@@ -1,8 +1,11 @@
 import json
+import os
 import re
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434/api/generate")
+if not OLLAMA_URL.endswith("/api/generate"):
+    OLLAMA_URL = OLLAMA_URL.rstrip("/") + "/api/generate"
 MODELO = "llama3.2:3b"
 
 TTS_LENTO = False
@@ -196,6 +199,9 @@ def corregir_consulta(texto_usuario, consulta_mala, error_sql):
         if problema:
             return {"error": problema}
         return _finalizar(accion, query, parametros)
+    except Exception as e:
+        return {"error": f"No se pudo corregir: {e}"}
+
 
 def redactar_respuesta(resultado, texto_usuario):
     """Redacta una respuesta hablada natural, máximo 2 oraciones."""

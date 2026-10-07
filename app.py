@@ -120,7 +120,7 @@ with st.sidebar:
     with st.expander("Ajustes", icon=":material/tune:"):
         import requests as _req
         try:
-            modelos = [m["name"] for m in _req.get("http://localhost:11434/api/tags", timeout=5).json().get("models", [])]
+            modelos = [m["name"] for m in _req.get(os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434") + "/api/tags", timeout=5).json().get("models", [])]
         except Exception:
             modelos = []
         if modelos:
