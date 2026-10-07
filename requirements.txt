@@ -1,0 +1,10 @@
+openai-whisper
+ollama
+psycopg2-binary
+pyttsx3
+streamlit
+python-dotenv
+streamlit-mic-recorder
+setuptools
+gTTS
+requests
