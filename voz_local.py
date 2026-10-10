@@ -148,6 +148,7 @@ class EscuchaVoz:
         self._niveles = deque(maxlen=50)
         self._fallo_en = 0.0
         self._lock = threading.Lock()
+        self._voz_habilitada = PORTAUDIO_AVAILABLE
 
     def configurar(self, activo, frase, usuario, voz=VOZ_AUTO, lento=False):
         self.frase = (frase or "").strip() or "hey Jarvis"
@@ -155,9 +156,13 @@ class EscuchaVoz:
         with self._lock:
             vivo = self._hilo is not None and self._hilo.is_alive()
             if activo and not vivo and time.time() - self._fallo_en > REINTENTO_ERROR_S:
-                self._parar.clear()
-                self._hilo = threading.Thread(target=self._bucle, daemon=True)
-                self._hilo.start()
+                # Solo iniciar si PortAudio está disponible
+                if self._voz_habilitada:
+                    self._parar.clear()
+                    self._hilo = threading.Thread(target=self._bucle, daemon=True)
+                    self._hilo.start()
+                else:
+                    self._poner("error", "Voz no disponible: PortAudio no instalado")
             elif activo and vivo:
                 self._parar.clear()
             elif not activo:
