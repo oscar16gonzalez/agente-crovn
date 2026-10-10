@@ -2,6 +2,7 @@
 import base64
 import html as _h
 import re
+from decimal import Decimal
 from datetime import date, datetime
 
 import temas
@@ -235,9 +236,13 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
   width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: var(--on-ac);
   background: var(--grad); box-shadow: 0 0 0 1px rgba(var(--ac-vivo-rgb),.4), var(--glow);
 }
-.ucard-nom { font-weight: 600; font-size: 1rem; color: var(--texto); overflow-wrap: anywhere; }
-.ucard-mail { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.ucard-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: .15rem; }
+.ucard-nom { display: block; min-width: 0; font-weight: 600; font-size: 1rem; color: var(--texto); overflow-wrap: anywhere; }
+.ucard-mail { display: block; min-width: 0; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 .ucard-bd { display: flex; flex-wrap: wrap; gap: .4rem; margin: .8rem 0 .2rem; }
+.ucard-productos { display: flex; align-items: baseline; gap: .45rem; margin-top: .8rem; padding-top: .7rem; border-top: 1px solid var(--borde); }
+.ucard-productos strong { color: var(--ac-vivo); font-size: 1.65rem; font-variant-numeric: tabular-nums; line-height: 1; }
+.ucard-productos span { color: var(--muted); font-size: .78rem; }
 .ucard dl { display: grid; grid-template-columns: auto 1fr; gap: .35rem .9rem; margin: .7rem 0 0; padding-top: .7rem; border-top: 1px solid var(--borde); font-size: .8rem; }
 .ucard dt { color: var(--muted); text-transform: uppercase; font-size: .64rem; letter-spacing: .1em; align-self: center; font-weight: 500; }
 .ucard dd { margin: 0; color: var(--fila); overflow-wrap: anywhere; }
@@ -441,6 +446,12 @@ def _num(v):
     return f"{float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _formato_cop(v):
+    entero_decimal = format(Decimal(str(v)), ",.2f")
+    entero, decimales = entero_decimal.split(".")
+    return f"COP ${entero.replace(',', '.')},{decimales}"
+
+
 def _es_numero(v):
     return not isinstance(v, bool) and (isinstance(v, (int, float)) or type(v).__name__ == "Decimal")
 
@@ -463,7 +474,7 @@ def _celda(col, v):
         if "pct" in c or "percent" in c:
             return f"{_num(v)}%"
         if any(k in c for k in _DINERO):
-            return _e("$" + _num(v))
+          return _e(_formato_cop(v))
         return _num(v)
     s = str(v)
     return _e(s if len(s) <= 80 else s[:77] + "…")
@@ -531,8 +542,27 @@ def _tarjeta_proveedor(columnas, fila):
     )
     return (
       f'<article class="ucard"><header class="ucard-top"><span class="ucard-av">{_e(iniciales)}</span>'
-      f'<span><span class="ucard-nom">{_e(nombre)}</span><span class="ucard-mail">{_e(email or "—")}</span></span></header>'
+      f'<span class="ucard-info"><span class="ucard-nom">{_e(nombre)}</span><span class="ucard-mail">{_e(email or "—")}</span></span></header>'
       f'<section class="ucard-bd">{badge}</section>' + (f"<dl>{datos}</dl>" if datos else "") + "</article>"
+    )
+
+
+def _es_resumen_proveedor(columnas):
+    claves = {c.lower() for c in columnas}
+    return bool(claves & {"proveedor", "supplier"}) and bool(claves & {"productos", "cantidad_productos", "total_productos"})
+
+
+def _tarjeta_resumen_proveedor(columnas, fila):
+    d = {c.lower(): (c, v) for c, v in zip(columnas, fila)}
+    nombre = str((d.get("proveedor") or d.get("supplier") or (None, _SIN_NOMBRE))[1] or _SIN_NOMBRE)
+    cantidad = next((d[k][1] for k in ("cantidad_productos", "total_productos", "productos") if k in d), 0)
+    iniciales = "".join(p[0] for p in nombre.split()[:2]).upper() or "?"
+    etiqueta = "producto" if cantidad == 1 else "productos"
+    return (
+        f'<article class="ucard"><header class="ucard-top"><span class="ucard-av">{_e(iniciales)}</span>'
+        f'<span class="ucard-info"><span class="ucard-nom">{_e(nombre)}</span>'
+        '<span class="ucard-mail">Proveedor del inventario</span></span></header>'
+        f'<section class="ucard-productos"><strong>{_e(_num(cantidad))}</strong><span>{etiqueta}</span></section></article>'
     )
 
 
@@ -541,7 +571,8 @@ def tarjeta_resultado(columnas, filas, titulo=None, query=None):
     tabla = re.search(r"\bFROM\s+(\S+)", query or "", re.IGNORECASE)
     fuente = tabla.group(1).strip('"').rsplit(".", 1)[-1].strip('"').lower() if tabla else ""
     if filas and 1 <= len(filas) <= 4 and fuente == "suppliers":
-      return '<section class="ucards">' + "".join(_tarjeta_proveedor(columnas, f) for f in filas) + "</section>"
+        renderizar = _tarjeta_resumen_proveedor if _es_resumen_proveedor(columnas) else _tarjeta_proveedor
+        return '<section class="ucards">' + "".join(renderizar(columnas, f) for f in filas) + "</section>"
     if filas and 1 <= len(filas) <= 4 and fuente != "suppliers" and _es_cliente(columnas):
         return '<div class="ucards">' + "".join(_tarjeta_cliente(columnas, f) for f in filas) + "</div>"
     return tabla_html(columnas, filas, titulo=titulo)

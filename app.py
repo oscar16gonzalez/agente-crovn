@@ -111,9 +111,9 @@ if not st.session_state.api_token:
         with intro:
             st.markdown(marca_html(ICONO), unsafe_allow_html=True)
             st.markdown(
-                '<div class="login-intro"><div class="login-eyebrow">Tu espacio de trabajo</div>'
-                '<h1>Tu tienda, en conversación.</h1>'
-                '<p>Consulta inventario, pedidos y clientes. CROVN convierte tus preguntas en acciones claras para el día a día.</p></div>',
+                '<div class="login-intro"><div class="login-eyebrow">CENTRO DE GESTIÓN</div>'
+                '<h1>Asistente Inteligente de Ventas.</h1>'
+                '<p>Gestiona inventario, clientes, ordenes en tiempo real y atiende a tus necesidades desde una sola consola..</p></div>',
                 unsafe_allow_html=True,
             )
         with acceso, st.container(key="login_panel"):
@@ -182,9 +182,11 @@ if "voz_activo" not in st.session_state:
 HISTORIAL_FILE = os.path.join(os.path.dirname(__file__), "historial.json")
 
 ETIQUETAS_CORTAS = {"ollama": "Ollama", "groq": "Groq", "openai": "OpenAI"}
+PROMPT_BALANCE_SEMANAL = "Balance semanal"
+ICONO_BALANCE_SEMANAL = ":material/summarize:"
 
 INFORMES_SUGERIDOS = [
-    ("Balance semanal", ":material/summarize:"),
+    (PROMPT_BALANCE_SEMANAL, ICONO_BALANCE_SEMANAL),
     ("Balance de la semana pasada", ":material/history:"),
     ("Balance del mes", ":material/calendar_month:"),
     ("Informe por stock en Excel", ":material/inventory:"),
@@ -359,7 +361,6 @@ def pintar_tokens():
 
 
 bd_ok = True
-abrir_producto = st.session_state.pop("abrir_producto", False)
 with st.sidebar:
     st.markdown(marca_html(ICONO), unsafe_allow_html=True)
     try:
@@ -484,52 +485,6 @@ with st.sidebar:
             guardar_voz(voz_actual)
 
     st.markdown('<div class="seccion">Herramientas</div>', unsafe_allow_html=True)
-    with st.expander("Nuevo producto", icon=":material/add_box:", expanded=abrir_producto):
-        with st.form("form_nuevo_producto"):
-            np_nombre = st.text_input("Nombre")
-            np_desc = st.text_input("Descripción", value="")
-            np_cat = st.text_input("Categoría")
-            np_size = st.selectbox("Talla", ["S", "M", "L", "XL", "Única"])
-            np_color = st.text_input("Color(es)")
-            np_genero = st.multiselect("Género (puedes elegir 1 o las 3)", ["Hombre", "Mujer", "Unisex"], default=["Unisex"])
-            np_precio = st.number_input("Precio", min_value=0.0, value=0.0, step=0.5)
-            np_stock = st.number_input("Stock", min_value=0, value=0, step=1)
-            if st.form_submit_button("Crear producto"):
-                if not any([np_nombre, np_desc, np_cat, np_color, np_precio, np_stock]):
-                    st.error("Completa al menos un campo.")
-                else:
-                    try:
-                        # Usar API REST para crear producto (valida, genera SKU, maneja imágenes)
-                        from api_client import get_api_client
-                        import asyncio
-                        
-                        api = get_api_client()
-                        # Obtener token si hay sesión admin (para desarrollo local, usa token por defecto)
-                        # En producción, el token debería venir de la autenticación
-                        data = {
-                            "name": np_nombre or "Sin nombre",
-                            "description": np_desc or "",
-                            "category": np_cat or "SIN-CATEGORIA",
-                            "size": np_size,
-                            "price": str(np_precio),
-                            "stock": str(np_stock),
-                            "color": np_color or "",
-                            "genero": "/".join(np_genero) or "Unisex",
-                        }
-                        
-                        # Ejecutar de forma async
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        result = loop.run_until_complete(api.create_product(data))
-                        loop.close()
-                        
-                        if result.ok:
-                            st.success(f"Producto '{data['name']}' creado ✅ (SKU: {result.data.get('sku', 'auto')})")
-                        else:
-                            st.error(f"Error creando producto: {result.error}")
-                    except Exception as e:
-                        st.error(f"Error creando producto: {e}")
-
     with st.expander("Informes y marketing", icon=":material/monitoring:"):
         st.caption("Se calculan sin usar el modelo (0 tokens). Puedes indicar fechas, hojas y un correo de destino.")
         for s, icono in INFORMES_SUGERIDOS:
@@ -564,11 +519,14 @@ with st.sidebar:
 
 with st.container(key="quick_actions"), st.popover(ICONO, help="Acciones rápidas"):
     st.markdown("**Acciones rápidas**")
-    if st.button("Crear producto", icon=":material/add_box:", key="quick_product", use_container_width=True):
-        st.session_state.abrir_producto = True
+    if st.button("Inventario", icon=":material/inventory_2:", key="quick_inventory", use_container_width=True):
+        st.session_state.sugerencia_activa = "¿qué productos tenemos en el inventario?"
         st.rerun()
-    if st.button("Generar código promocional", icon=":material/confirmation_number:", key="quick_promo", use_container_width=True):
-        st.session_state.sugerencia_activa = "Sugiere códigos promocionales"
+    if st.button("Generar balance semanal", icon=ICONO_BALANCE_SEMANAL, key="quick_weekly_balance", use_container_width=True):
+        st.session_state.sugerencia_activa = PROMPT_BALANCE_SEMANAL
+        st.rerun()
+    if st.button("Listado de órdenes", icon=":material/receipt_long:", key="quick_orders_list", use_container_width=True):
+        st.session_state.sugerencia_activa = "Listado de órdenes pendientes"
         st.rerun()
     if st.button(CHAT_NUEVO, icon=":material/add:", key="quick_new_chat", use_container_width=True):
         crear_chat()
@@ -597,7 +555,7 @@ TARJETAS = [
     (":material/receipt_long:", "Listado de órdenes pendientes"),
     (":material/trending_up:", "Productos más vendidos"),
     (":material/sell:", "Códigos de promoción activos"),
-    (":material/summarize:", "Balance semanal"),
+    (ICONO_BALANCE_SEMANAL, PROMPT_BALANCE_SEMANAL),
     (":material/campaign:", "Sugiere nuevos avisos"),
 ]
 

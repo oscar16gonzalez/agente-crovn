@@ -415,7 +415,7 @@ TABLAS = {
         ],
         "ejemplos": [
             ("proveedores activos", """SELECT id, name, contact, phone, email FROM suppliers WHERE active = true ORDER BY name;""", []),
-            ("productos por proveedor", """SELECT s.name AS proveedor, COUNT(p.id) AS productos FROM suppliers s LEFT JOIN products p ON p."supplierId" = s.id GROUP BY s.name ORDER BY productos DESC;""", []),
+            ("productos por proveedor", """SELECT s.name AS proveedor, COUNT(DISTINCT p.id) AS cantidad_productos FROM suppliers s LEFT JOIN products p ON p."supplierId" = s.id GROUP BY s.id, s.name ORDER BY cantidad_productos DESC, s.name;""", []),
             ("productos sin proveedor", """SELECT id, name, category FROM products WHERE "supplierId" IS NULL;""", []),
             ("crea un proveedor llamado Textiles SA con teléfono 3001234567",
              """INSERT INTO suppliers (name, contact, phone, email, address, notes, active, "updatedAt") VALUES (%s, %s, %s, %s, %s, %s, true, NOW());""",
