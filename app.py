@@ -371,7 +371,7 @@ with st.sidebar:
         bd_ok = False
     st.markdown(estado_bd_html(bd_ok), unsafe_allow_html=True)
     if not bd_ok:
-        st.caption("Revisa AIVEN_DATABASE_URL en .env")
+        st.caption("Revisa NEON_DATABASE_URL en .env")
 
     if st.button(CHAT_NUEVO, icon=":material/add:", type="primary", use_container_width=True):
         crear_chat()
