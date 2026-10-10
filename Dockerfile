@@ -15,6 +15,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Dar permisos de escritura al usuario appuser sobre /app
+RUN chown -R appuser:appuser /app
+
 USER appuser
 
 EXPOSE 8501
