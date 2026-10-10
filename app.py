@@ -418,10 +418,6 @@ with st.sidebar:
         if voz_actual != cargar_voz():
             guardar_voz(voz_actual)
 
-    st.markdown('<div class="seccion">Apariencia</div>', unsafe_allow_html=True)
-    with st.expander("Tema y apariencia", icon=":material/palette:"):
-        panel_tema()
-
     st.markdown('<div class="seccion">Herramientas</div>', unsafe_allow_html=True)
     with st.expander("Nuevo producto", icon=":material/add_box:"):
         with st.form("form_nuevo_producto"):
@@ -490,6 +486,13 @@ with st.sidebar:
 
 # ---------- Chat ----------
 FECHA_FMT = "%d/%m/%Y %H:%M:%S"
+
+
+with st.expander(
+    f"Apariencia · {temas.PRESETS[TEMA_CFG['preset']]['nombre']}",
+    icon=":material/palette:",
+):
+    panel_tema()
 
 
 def burbuja_usuario(texto):

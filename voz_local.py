@@ -1,4 +1,5 @@
-"""Escucha local de la palabra de activación (micrófono del equipo + Whisper) y voz del asistente."""
+"""Escucha local de la palabra de activación (micrófono del equipo + Whisper) y voz del asistente.
+En producción (Render) la funcionalidad de voz se desactiva automáticamente si no hay PortAudio."""
 import difflib
 import queue
 import random
@@ -13,6 +14,14 @@ from datetime import datetime
 from functools import lru_cache
 
 import numpy as np
+
+# Verificar disponibilidad de PortAudio/sounddevice
+try:
+    import sounddevice as sd
+    PORTAUDIO_AVAILABLE = True
+except ImportError:
+    sd = None
+    PORTAUDIO_AVAILABLE = False
 
 FS = 16000
 BLOQUE = 1600  # 0.1 s
@@ -166,6 +175,12 @@ class EscuchaVoz:
         self.estado, self.detalle = estado, detalle
 
     def _bucle(self):
+        # Si no hay PortAudio, desactivar funcionalidad de voz
+        if not PORTAUDIO_AVAILABLE:
+            self._poner("error", "Voz no disponible: PortAudio no instalado en el servidor")
+            self._poner("apagado", "")
+            return
+
         try:
             import sounddevice as sd
             from stt_module import cargar_modelo

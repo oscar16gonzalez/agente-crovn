@@ -89,7 +89,8 @@ footer, [data-testid="stAppDeployButton"] { display: none !important; }
   transition: border-color .18s, background .18s, transform .18s, box-shadow .18s;
 }
 .stButton > button:hover, [data-testid="stFormSubmitButton"] > button:hover, [data-testid="stDownloadButton"] > button:hover {
-  border-color: rgba(var(--ac-vivo-rgb),.6); background: rgba(var(--ac-rgb),.08); color: var(--texto); transform: translateY(-1px); box-shadow: var(--glow);
+  border-color: rgba(var(--ac-vivo-rgb),.4); background: rgba(var(--ac-rgb),.05); color: var(--texto); transform: translateY(-1px);
+  box-shadow: 0 5px 16px rgba(var(--sombra-rgb),calc(var(--sa) * .7));
 }
 button[data-testid="stBaseButton-primary"] {
   background: var(--grad); border: none; color: var(--on-ac); box-shadow: 0 8px 20px rgba(var(--ac-rgb),.28);
@@ -136,25 +137,37 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
 [data-testid="stTextInput"] input:focus { border-color: rgba(var(--ac-vivo-rgb),.7) !important; box-shadow: 0 0 0 3px rgba(var(--ac-rgb),.15) !important; }
 
 /* ---------- Bienvenida ---------- */
-.bienvenida { text-align: center; padding: 4vh 0 1.8rem; animation: subir .6s ease both; }
+.bienvenida {
+  display: grid; grid-template-columns: 84px minmax(0, 1fr); align-items: center; gap: 1.35rem;
+  max-width: 760px; margin: 4vh auto 1.8rem; text-align: left; padding: 1.2rem 0 1.8rem; animation: subir .6s ease both;
+}
+.bienvenida-contenido { min-width: 0; }
 .hero-craneo {
-  width: 84px; height: 84px; margin: 0 auto 1.1rem; border-radius: 50%; display: grid; place-items: center; font-size: 2.8rem;
+  width: 84px; height: 84px; border-radius: 50%; display: grid; place-items: center; font-size: 2.8rem;
   background: radial-gradient(circle at 50% 30%, var(--medalla), var(--bg) 75%); box-shadow: 0 0 0 1px rgba(var(--ac-vivo-rgb),.4), var(--glow-fuerte);
   animation: latido 3.2s ease-in-out infinite;
 }
-.bienvenida .hola { color: var(--ac-vivo); font-weight: 600; letter-spacing: .28em; font-size: .72rem; text-transform: uppercase; }
+.bienvenida .hola { color: var(--ac-vivo); font-weight: 600; letter-spacing: .18em; font-size: .7rem; text-transform: uppercase; }
 .bienvenida h1 {
-  font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; margin: .5rem 0 .6rem; padding: 0;
+  font-size: 2.35rem; font-weight: 700; margin: .45rem 0 .6rem; padding: 0; line-height: 1.12;
   background: linear-gradient(180deg, var(--texto), var(--muted)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
 }
-.bienvenida p { color: var(--muted); max-width: 520px; margin: 0 auto; line-height: 1.6; font-size: .95rem; }
+.bienvenida p { color: var(--muted); max-width: 600px; margin: 0; line-height: 1.65; font-size: .95rem; }
 .st-key-tarjetas { animation: subir .7s ease .1s both; }
 .st-key-tarjetas button {
   height: auto; min-height: 72px; padding: 1rem 1.1rem; border-radius: var(--r); background: var(--panel); border-color: var(--borde);
   justify-content: flex-start; text-align: left; box-shadow: 0 4px 14px rgba(var(--sombra-rgb), calc(var(--sa) * .5));
 }
-.st-key-tarjetas button:hover { box-shadow: 0 10px 28px rgba(var(--ac-rgb),.16); border-color: rgba(var(--ac-vivo-rgb),.5); transform: translateY(-2px); }
+.st-key-tarjetas button:hover { box-shadow: 0 8px 22px rgba(var(--sombra-rgb),calc(var(--sa) * .8)); border-color: rgba(var(--ac-vivo-rgb),.35); transform: translateY(-1px); }
 .st-key-tarjetas [data-testid="stIconMaterial"] { color: var(--ac-vivo); }
+@media (max-width: 640px) {
+  .bienvenida { grid-template-columns: 56px minmax(0, 1fr); gap: .85rem; margin-top: 2vh; padding: .8rem 0 1.2rem; }
+  .hero-craneo { width: 56px; height: 56px; font-size: 2rem; }
+  .bienvenida .hola { font-size: .62rem; letter-spacing: .12em; }
+  .bienvenida h1 { font-size: 1.65rem; }
+  .bienvenida p { font-size: .88rem; }
+  .st-key-tarjetas button { min-height: 66px; padding: .75rem; }
+}
 
 /* ---------- Mensajes ---------- */
 .cabecera {
@@ -179,8 +192,10 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
   background: radial-gradient(circle at 50% 30%, var(--medalla), var(--bg) 75%) !important;
   box-shadow: 0 0 0 1px rgba(var(--ac-vivo-rgb),.4), var(--glow);
 }
+[data-testid="stChatMessage"] > div:nth-child(2) { min-width: 0; max-width: 72ch; }
 [data-testid="stChatMessage"] [data-testid="stCaptionContainer"] { color: var(--muted); font-size: .72rem; }
-[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p { line-height: 1.65; }
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p { line-height: 1.75; }
+[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] :is(ul, ol) { padding-left: 1.25rem; line-height: 1.75; }
 
 /* ---------- Tarjetas de datos ---------- */
 .dt { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--r); overflow: hidden; margin: .3rem 0 .8rem; box-shadow: 0 8px 30px rgba(var(--sombra-rgb),var(--sa)); }
@@ -241,12 +256,12 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
 
 /* ---------- Campo de escritura (barra flotante) ---------- */
 [data-testid="stChatInput"] {
-  border-radius: var(--r-lg); border: 1px solid rgba(var(--ac-oscuro-rgb),.45); background: var(--panel-2);
-  box-shadow: 0 14px 40px rgba(var(--sombra-rgb),calc(var(--sa) * 1.6)), 0 0 0 1px rgba(var(--ac-rgb),.04); transition: border-color .2s, box-shadow .2s;
+  border-radius: var(--r-lg); border: 1px solid rgba(var(--ac-oscuro-rgb),.28); background: var(--panel-2);
+  box-shadow: 0 10px 30px rgba(var(--sombra-rgb),calc(var(--sa) * 1.2)); transition: border-color .2s, box-shadow .2s;
 }
 [data-testid="stChatInput"] > div, [data-testid="stChatInput"] textarea { background: transparent !important; color: var(--texto); }
 [data-testid="stChatInput"]:focus-within {
-  border-color: rgba(var(--ac-vivo-rgb),.75); box-shadow: 0 0 0 3px rgba(var(--ac-rgb),.16), 0 14px 40px rgba(var(--sombra-rgb),calc(var(--sa) * 1.8));
+  border-color: rgba(var(--ac-vivo-rgb),.65); box-shadow: 0 0 0 2px rgba(var(--ac-rgb),.12), 0 10px 30px rgba(var(--sombra-rgb),calc(var(--sa) * 1.2));
 }
 [data-testid="stChatInput"] textarea { padding-left: 3.4rem !important; }
 [data-testid="stChatInput"] textarea::placeholder { color: var(--tenue); }
@@ -371,10 +386,10 @@ def estado_bd_html(ok):
 
 def bienvenida_html(icono=CRANEO):
     return (
-        f'<div class="bienvenida"><div class="hero-craneo">{icono}</div><div class="hola">CROVN Command Center</div>'
-        '<h1>¿Qué quieres saber de tu tienda?</h1>'
+    f'<div class="bienvenida"><div class="hero-craneo">{icono}</div><div class="bienvenida-contenido">'
+    '<div class="hola">CROVN Command Center</div><h1>¿Qué quieres saber de tu tienda?</h1>'
         '<p>Consulta inventario, órdenes, clientes y promociones con tu voz o escribiendo. '
-        'También puedo crear códigos, proveedores y actualizar datos.</p></div>'
+    'También puedo crear códigos, proveedores y actualizar datos.</p></div></div>'
     )
 
 

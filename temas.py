@@ -121,7 +121,7 @@ def resolver(cfg):
         "degradado": bool(degradado), "grad": grad,
         "on_ac": "#ffffff" if luminancia(base_boton) < .3 else "#0a0a0c",
         "panel": mezclar(fondo, "#ffffff", .7) if claro else mezclar(fondo, texto, .05),
-        "panel2": "#ffffff" if claro else mezclar(fondo, texto, .085),
+        "panel2": mezclar(fondo, texto, .025) if claro else mezclar(fondo, texto, .085),
         "inset": mezclar(fondo, texto, .045) if claro else mezclar(fondo, "#000000", .3),
         "borde": mezclar(fondo, texto, .14 if claro else .13),
         "muted": mezclar(texto, fondo, .42),
