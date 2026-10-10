@@ -484,10 +484,20 @@ def _etiqueta_col(c):
     return _e(str(c).replace("_", " "))
 
 
+def _valores_fila(columnas, fila):
+    if isinstance(fila, dict):
+        valores = {str(clave).lower(): valor for clave, valor in fila.items()}
+        return tuple(valores.get(str(columna).lower()) for columna in columnas)
+    if isinstance(fila, (list, tuple)):
+        return tuple(fila[i] if i < len(fila) else None for i in range(len(columnas)))
+    return (fila, *(None for _ in columnas[1:]))
+
+
 def tabla_html(columnas, filas, limite=100, titulo=None):
     """Tabla estilizada (solo lectura) con badges de estado y stock."""
     if not filas:
         return '<div class="dt"><div class="dt-vacio">Sin resultados.</div></div>'
+    filas = [_valores_fila(columnas, fila) for fila in filas]
     cab = "".join(f'<th class="{"num" if _es_numero(filas[0][i]) else ""}">{_etiqueta_col(c)}</th>' for i, c in enumerate(columnas))
     cuerpo = "".join(
         "<tr>" + "".join(f'<td class="{"num" if _es_numero(v) else ""}">{_celda(c, v)}</td>' for c, v in zip(columnas, fila)) + "</tr>"
@@ -568,6 +578,7 @@ def _tarjeta_resumen_proveedor(columnas, fila):
 
 def tarjeta_resultado(columnas, filas, titulo=None, query=None):
     """Tarjetas de cliente/proveedor para resultados cortos; tabla estilizada para el resto."""
+    filas = [_valores_fila(columnas, fila) for fila in filas]
     tabla = re.search(r"\bFROM\s+(\S+)", query or "", re.IGNORECASE)
     fuente = tabla.group(1).strip('"').rsplit(".", 1)[-1].strip('"').lower() if tabla else ""
     if filas and 1 <= len(filas) <= 4 and fuente == "suppliers":
