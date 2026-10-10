@@ -77,36 +77,50 @@ class CROVNApiClient:
         data: dict | None = None,
         files: dict | None = None,
     ) -> ApiResponse:
-        """Ejecuta petición HTTP y normaliza respuesta."""
+        """Ejecuta petición HTTP con reintentos y normaliza respuesta."""
         headers = self._default_headers()
         # Si hay files, quitar Content-Type para que httpx ponga multipart/form-data
         if files:
             headers.pop("Content-Type", None)
 
-        try:
-            resp = await self.client.request(
-                method, path, params=params, json=json, data=data, files=files, headers=headers
-            )
-            if resp.status_code >= 400:
-                try:
-                    err = resp.json()
-                    msg = err.get("message") or err.get("error") or resp.text[:200]
-                except Exception:
-                    msg = resp.text[:200]
-                return ApiResponse(ok=False, error=f"HTTP {resp.status_code}: {msg}")
+        max_retries = 3
+        retry_delay = 1.0
 
-            data = resp.json() if resp.content else {}
-            return ApiResponse(
-                ok=data.get("ok", True),
-                data=data.get("data"),
-                message=data.get("message", ""),
-            )
-        except httpx.TimeoutException:
-            return ApiResponse(ok=False, error="Timeout conectando con la API")
-        except httpx.ConnectError:
-            return ApiResponse(ok=False, error="No se puede conectar al backend")
-        except Exception as e:
-            return ApiResponse(ok=False, error=f"Error de red: {e}")
+        for attempt in range(max_retries):
+            try:
+                resp = await self.client.request(
+                    method, path, params=params, json=json, data=data, files=files, headers=headers
+                )
+                if resp.status_code >= 400:
+                    try:
+                        err = resp.json()
+                        msg = err.get("message") or err.get("error") or resp.text[:200]
+                    except Exception:
+                        msg = resp.text[:200]
+                    return ApiResponse(ok=False, error=f"HTTP {resp.status_code}: {msg}")
+
+                data = resp.json() if resp.content else {}
+                return ApiResponse(
+                    ok=data.get("ok", True),
+                    data=data.get("data"),
+                    message=data.get("message", ""),
+                )
+            except httpx.TimeoutException:
+                if attempt < max_retries - 1:
+                    import asyncio
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                return ApiResponse(ok=False, error="Timeout conectando con la API")
+            except httpx.ConnectError:
+                if attempt < max_retries - 1:
+                    import asyncio
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                return ApiResponse(ok=False, error="No se puede conectar al backend")
+            except Exception as e:
+                return ApiResponse(ok=False, error=f"Error de red: {e}")
 
     # ==================== PRODUCTOS ====================
 

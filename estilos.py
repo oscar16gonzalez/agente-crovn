@@ -104,6 +104,8 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
 [data-testid="stSidebar"] button[data-testid="stBaseButton-tertiary"] p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [data-testid="stSidebar"] [data-testid="stColumn"] button { padding-left: .4rem; padding-right: .4rem; }
 [data-testid="stSidebar"] [data-testid="stColumn"] button p { white-space: nowrap; font-size: .85rem; }
+.st-key-sidebar_footer { position: sticky; bottom: 0; z-index: 20; margin-top: auto; padding: .65rem 0 .2rem; background: var(--panel); border-top: 1px solid var(--borde); }
+.st-key-sidebar_footer [data-testid="stCaptionContainer"] { padding-bottom: .35rem; }
 
 /* Segmented control: módulos y proveedor de IA */
 [data-baseweb="button-group"] {
@@ -295,6 +297,16 @@ button[data-testid="stBaseButton-primary"]:hover { filter: brightness(1.12); bac
 .stApp:has(.grabando) .st-key-mic_grabar { bottom: 58px; left: calc(var(--sb) + max(30px, (100vw - var(--sb)) / 2 - var(--ancho) / 2 + 30px) - 18px); }
 .stApp:has(.grabando) [data-testid="stChatInput"] textarea::placeholder { color: transparent; }
 
+/* Acciones rápidas en el botón del asistente */
+.st-key-quick_actions { position: fixed; top: 54vh; right: max(16px, calc((100vw - var(--sb)) / 2 - var(--ancho) / 2 - 110px)); z-index: 1100; width: auto; }
+.st-key-quick_actions [data-testid="stPopoverButton"] {
+  width: 72px; height: 72px; min-height: 72px; padding: 0; border-radius: 50%; font-size: 2.2rem;
+  background: radial-gradient(circle at 50% 30%, var(--medalla), var(--bg) 75%); border: 1px solid rgba(var(--ac-vivo-rgb),.45);
+  box-shadow: 0 0 0 1px rgba(var(--ac-vivo-rgb),.25), var(--glow-fuerte); animation: flotar 3.2s ease-in-out infinite, latido 3.2s ease-in-out infinite;
+}
+.st-key-quick_actions [data-testid="stPopoverButton"]:hover { transform: scale(1.05); }
+[data-testid="stPopoverBody"] { background: var(--panel) !important; border: 1px solid var(--borde) !important; border-radius: var(--r) !important; box-shadow: 0 16px 44px rgba(var(--sombra-rgb),var(--sa)); }
+
 /* Detener consulta */
 [class*="st-key-detener_"] {
   position: fixed; bottom: 92px; z-index: 1000; width: auto;
@@ -420,6 +432,7 @@ _TONO_ESTADO = {
     "activo": "ok", "inactivo": "mute", "cancelado": "alerta", "agotado": "alerta",
 }
 _DINERO = ("price", "precio", "total", "cost", "costo", "ingres", "revenue", "valor", "monto", "amount", "discount", "descuento")
+_SIN_NOMBRE = "Sin nombre"
 
 
 def _num(v):
@@ -484,7 +497,7 @@ def _es_cliente(columnas):
 
 def _tarjeta_cliente(columnas, fila):
     d = {c.lower(): (c, v) for c, v in zip(columnas, fila)}
-    nombre = str((d.get("name") or d.get("nombre"))[1] or "Sin nombre")
+    nombre = str((d.get("name") or d.get("nombre"))[1] or _SIN_NOMBRE)
     email = d["email"][1]
     iniciales = "".join(p[0] for p in nombre.split()[:2]).upper() or "?"
     vip = d.get("isvip", (None, False))[1]
@@ -500,9 +513,36 @@ def _tarjeta_cliente(columnas, fila):
     )
 
 
-def tarjeta_resultado(columnas, filas, titulo=None):
-    """User Card si el resultado son 1-4 clientes; tabla estilizada en el resto de casos."""
-    if filas and 1 <= len(filas) <= 4 and _es_cliente(columnas):
+def _tarjeta_proveedor(columnas, fila):
+    d = {c.lower(): (c, v) for c, v in zip(columnas, fila)}
+    nombre = str((d.get("name") or d.get("nombre") or (None, _SIN_NOMBRE))[1] or _SIN_NOMBRE)
+    email = d.get("email", (None, None))[1]
+    iniciales = "".join(p[0] for p in nombre.split()[:2]).upper() or "?"
+    activo = d.get("active", (None, None))[1]
+    badge = ""
+    if activo is True:
+        badge = _badge("Activo", "ok")
+    elif activo is False:
+        badge = _badge("Inactivo", "mute")
+    campos = ("contact", "phone", "address", "notes")
+    datos = "".join(
+        f"<dt>{_etiqueta_col(d[c][0])}</dt><dd>{_celda(d[c][0], d[c][1])}</dd>"
+        for c in campos if c in d and d[c][1] is not None
+    )
+    return (
+      f'<article class="ucard"><header class="ucard-top"><span class="ucard-av">{_e(iniciales)}</span>'
+      f'<span><span class="ucard-nom">{_e(nombre)}</span><span class="ucard-mail">{_e(email or "—")}</span></span></header>'
+      f'<section class="ucard-bd">{badge}</section>' + (f"<dl>{datos}</dl>" if datos else "") + "</article>"
+    )
+
+
+def tarjeta_resultado(columnas, filas, titulo=None, query=None):
+    """Tarjetas de cliente/proveedor para resultados cortos; tabla estilizada para el resto."""
+    tabla = re.search(r"\bFROM\s+(\S+)", query or "", re.IGNORECASE)
+    fuente = tabla.group(1).strip('"').rsplit(".", 1)[-1].strip('"').lower() if tabla else ""
+    if filas and 1 <= len(filas) <= 4 and fuente == "suppliers":
+      return '<section class="ucards">' + "".join(_tarjeta_proveedor(columnas, f) for f in filas) + "</section>"
+    if filas and 1 <= len(filas) <= 4 and fuente != "suppliers" and _es_cliente(columnas):
         return '<div class="ucards">' + "".join(_tarjeta_cliente(columnas, f) for f in filas) + "</div>"
     return tabla_html(columnas, filas, titulo=titulo)
 

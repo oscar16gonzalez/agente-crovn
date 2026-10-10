@@ -15,11 +15,15 @@ from functools import lru_cache
 
 import numpy as np
 
-# Verificar disponibilidad de PortAudio/sounddevice
+# Verificar disponibilidad de PortAudio/sounddevice de forma segura
+PORTAUDIO_AVAILABLE = False
+sd = None
 try:
-    import sounddevice as sd
+    import sounddevice as _sd
+    sd = _sd
     PORTAUDIO_AVAILABLE = True
-except (ImportError, OSError):
+except (ImportError, OSError, Exception):
+    # PortAudio no disponible (entorno sin audio como contenedores Docker/Render)
     sd = None
     PORTAUDIO_AVAILABLE = False
 
@@ -187,7 +191,6 @@ class EscuchaVoz:
             return
 
         try:
-            import sounddevice as sd
             from stt_module import cargar_modelo
             self._poner("cargando", "Cargando reconocimiento de voz…")
             cargar_modelo()

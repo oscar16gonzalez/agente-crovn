@@ -17,7 +17,7 @@ from contexto_app import TABLAS, sugerencias, SessionContext, IntentType
 import informes as _inf
 import temas
 from estilos import (
-    CSS_BASE, ALTO_REPRODUCTOR, estilos_chat_activo, craneo_flotante, marca_html, estado_bd_html, bienvenida_html,
+    CSS_BASE, ALTO_REPRODUCTOR, estilos_chat_activo, marca_html, estado_bd_html, bienvenida_html,
     cabecera_html, opcion_ia_html, tarjeta_resultado, tarjeta_accion, datos_modificados, sql_resaltado, reproductor_html, voz_estado_html,
 )
 
@@ -155,8 +155,6 @@ if not st.session_state.api_token:
             st.markdown('<div class="login-security">Acceso privado · sesión protegida</div>', unsafe_allow_html=True)
     st.stop()
 
-st.markdown(craneo_flotante(ICONO), unsafe_allow_html=True)
-
 VOZ_FILE = os.path.join(os.path.dirname(__file__), "config_voz.json")
 VOZ_DEFECTO = {"activo": True, "asistente": "hey Jarvis", "usuario": "Oscar", "voz": "Automática"}
 
@@ -196,9 +194,19 @@ INFORMES_SUGERIDOS = [
     ("Sugiere códigos promocionales", ":material/sell:"),
 ]
 
+CHAT_NUEVO = "Nuevo chat"
 
-def _chat_vacio(titulo="Nuevo chat"):
+def _chat_vacio(titulo=CHAT_NUEVO):
     return {"titulo": titulo, "mensajes": []}
+
+
+def crear_chat():
+    st.session_state.chats.append(_chat_vacio())
+    st.session_state.chat_activo = len(st.session_state.chats) - 1
+    st.session_state.historial = chat_actual()["mensajes"]
+    st.session_state.sugerencia_activa = None
+    reiniciar_sesion()
+    guardar_chats()
 
 
 def cargar_chats():
@@ -351,6 +359,7 @@ def pintar_tokens():
 
 
 bd_ok = True
+abrir_producto = st.session_state.pop("abrir_producto", False)
 with st.sidebar:
     st.markdown(marca_html(ICONO), unsafe_allow_html=True)
     try:
@@ -363,25 +372,8 @@ with st.sidebar:
     if not bd_ok:
         st.caption("Revisa NEON_DATABASE_URL en .env")
 
-    # --- AUTENTICACIÓN API ---
-    st.success(f"Conectado como {st.session_state.get('api_user', 'admin')}")
-    if st.button("Cerrar sesión", icon=":material/logout:", use_container_width=True):
-        st.session_state.api_token = None
-        st.session_state.api_user = None
-        st.session_state.login_error = None
-        st.session_state.clear_login_password = True
-        if isinstance(cookie_controller.getAll(), dict) and cookie_controller.get("crovn_auth_token"):
-            cookie_controller.remove("crovn_auth_token", secure=cookie_secure)
-        set_api_token(None)
-        st.rerun()
-
-    if st.button("Nuevo chat", icon=":material/add:", type="primary", use_container_width=True):
-        st.session_state.chats.append(_chat_vacio())
-        st.session_state.chat_activo = len(st.session_state.chats) - 1
-        st.session_state.historial = chat_actual()["mensajes"]
-        # Reiniciar contexto de sesión del agente
-        reiniciar_sesion()
-        guardar_chats()
+    if st.button(CHAT_NUEVO, icon=":material/add:", type="primary", use_container_width=True):
+        crear_chat()
         st.rerun()
 
     st.markdown('<div class="seccion">Chats recientes</div>', unsafe_allow_html=True)
@@ -492,7 +484,7 @@ with st.sidebar:
             guardar_voz(voz_actual)
 
     st.markdown('<div class="seccion">Herramientas</div>', unsafe_allow_html=True)
-    with st.expander("Nuevo producto", icon=":material/add_box:"):
+    with st.expander("Nuevo producto", icon=":material/add_box:", expanded=abrir_producto):
         with st.form("form_nuevo_producto"):
             np_nombre = st.text_input("Nombre")
             np_desc = st.text_input("Descripción", value="")
@@ -556,6 +548,31 @@ with st.sidebar:
         icono = ":material/edit:" if escribe else ":material/search:"
         if st.button(s, key=f"sug_{tabla_sel}_{s}", icon=icono, type="tertiary", use_container_width=True):
             st.session_state.sugerencia_activa = s
+
+    with st.container(key="sidebar_footer"):
+        st.markdown('<div class="seccion">Sesión</div>', unsafe_allow_html=True)
+        st.caption(f"Conectado como {st.session_state.get('api_user', 'admin')}")
+        if st.button("Cerrar sesión", icon=":material/logout:", key="logout", use_container_width=True):
+            st.session_state.api_token = None
+            st.session_state.api_user = None
+            st.session_state.login_error = None
+            st.session_state.clear_login_password = True
+            if isinstance(cookie_controller.getAll(), dict) and cookie_controller.get("crovn_auth_token"):
+                cookie_controller.remove("crovn_auth_token", secure=cookie_secure)
+            set_api_token(None)
+            st.rerun()
+
+with st.container(key="quick_actions"), st.popover(ICONO, help="Acciones rápidas"):
+    st.markdown("**Acciones rápidas**")
+    if st.button("Crear producto", icon=":material/add_box:", key="quick_product", use_container_width=True):
+        st.session_state.abrir_producto = True
+        st.rerun()
+    if st.button("Generar código promocional", icon=":material/confirmation_number:", key="quick_promo", use_container_width=True):
+        st.session_state.sugerencia_activa = "Sugiere códigos promocionales"
+        st.rerun()
+    if st.button(CHAT_NUEVO, icon=":material/add:", key="quick_new_chat", use_container_width=True):
+        crear_chat()
+        st.rerun()
 
 # ---------- Chat ----------
 FECHA_FMT = "%d/%m/%Y %H:%M:%S"
@@ -853,7 +870,7 @@ def _procesar_comando(texto):
             st.markdown(sql_resaltado(consulta["query"], consulta.get("parametros")), unsafe_allow_html=True)
         tarjeta = ""
         if consulta["accion"] == "SELECT" and resultado and isinstance(resultado, list) and columnas:
-            tarjeta = tarjeta_resultado(columnas, resultado)
+            tarjeta = tarjeta_resultado(columnas, resultado, query=consulta.get("query"))
             st.markdown(tarjeta, unsafe_allow_html=True)
             try:
                 st.download_button("Descargar Excel", _inf.excel_de_resultado(resultado, columnas), file_name=f"consulta_{datetime.now():%Y%m%d_%H%M%S}.xlsx",
@@ -964,7 +981,11 @@ if st.session_state.procesando_audio:
 # Micrófono: a la izquierda del campo de escritura (posición en estilos.py)
 if not st.session_state.grabando:
     if st.button("", key="mic_grabar", icon=":material/mic:", help="Grabar audio"):
-        import sounddevice as sd
+        try:
+            import sounddevice as sd
+        except (ImportError, OSError):
+            st.error("Micrófono no disponible: PortAudio no instalado en el servidor")
+            st.stop()
         frames_lista = []
         st.session_state.frames = frames_lista
         fs = 16000
