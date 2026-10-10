@@ -7,13 +7,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DB_MODE = os.getenv("DB_MODE", "neon").strip().lower()
 NEON_DATABASE_URL = os.getenv("NEON_DATABASE_URL")
+LOCAL_DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
 
 
 def get_connection():
-    if not NEON_DATABASE_URL:
-        raise ValueError("NEON_DATABASE_URL no está configurada en el archivo .env")
-    conn = psycopg2.connect(NEON_DATABASE_URL)
+    if DB_MODE == "local":
+        var, url = "LOCAL_DATABASE_URL", LOCAL_DATABASE_URL
+    else:
+        var, url = "NEON_DATABASE_URL", NEON_DATABASE_URL
+    if not url:
+        raise ValueError(f"{var} no está configurada en el archivo .env")
+    conn = psycopg2.connect(url)
     try:
         cur = conn.cursor()
         cur.execute("SET TIME ZONE 'UTC';")
@@ -60,7 +66,7 @@ def obtener_esquema():
             SELECT table_name, column_name, data_type, is_nullable, column_default
             FROM information_schema.columns
             WHERE table_schema = 'public' AND table_name NOT LIKE '\\_%'
-              AND table_name NOT IN ('admin_users', 'product_images')
+              AND table_name NOT IN ('admin_users')
             ORDER BY table_name, ordinal_position;
         """)
         filas = cur.fetchall()

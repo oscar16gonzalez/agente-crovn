@@ -1,4 +1,5 @@
 .env
 historial.json
+informes/
 __pycache__/
 *.pyc

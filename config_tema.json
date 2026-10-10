@@ -1,0 +1,15 @@
+{
+  "preset": "carmesi",
+  "acento": "#dc2626",
+  "acento2": "#e67071",
+  "fondo": "#0a0a0c",
+  "texto": "#f8fafc",
+  "degradado": false,
+  "fuente": "Inter",
+  "radio": "Moderno",
+  "ancho": "Normal",
+  "fondo_estilo": "Aurora",
+  "brillo": true,
+  "animaciones": true,
+  "icono": "💀"
+}

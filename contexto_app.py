@@ -2,20 +2,218 @@
 import json
 import re
 import unicodedata
+from enum import Enum
+from dataclasses import dataclass, field
+from typing import Optional
+from datetime import datetime
 
 ESTADOS_ORDEN = ("Pendiente", "Procesado", "Enviado", "Entregado")
 ESTADOS_VENTA = ("Procesado", "Enviado", "Entregado")
 TALLAS = ("XS", "S", "M", "L", "XL", "XXL")
 
-REGLAS_GLOBALES = """## 3. REGLAS DE NEGOCIO GLOBALES (CROVN: tienda de ropa urbana en Colombia, moneda COP)
-- Columnas camelCase (createdAt, updatedAt, customerId, productId, orderId, discountPct, maxUses, usedCount, expiresAt, publishedAt, isVIP, promoCode...) escríbelas SIN comillas dobles: el sistema las entrecomilla solo. NUNCA uses comillas dobles dentro de la consulta.
-- Texto: compara con LOWER(col) LIKE '%valor%'. Fechas: 'YYYY-MM-DD' tal cual las dice el usuario (05/10/2026 -> '2026-10-05'), sin restar días ni zonas horarias. Timestamps actuales: NOW(). Hoy: CURRENT_DATE.
-- INSERT: incluye SOLO las columnas que el usuario mencionó; con un solo dato basta. NUNCA inventes valores ni pidas más datos: el sistema completa solo las columnas obligatorias que falten (updatedAt, correo, código, etc.). No incluyas updatedAt ni createdAt.
-- Parámetros: en UPDATE/INSERT usa %s y devuelve los valores en "parametros". No uses el carácter % literal en queries que llevan %s.
-- Ingresos/ventas = órdenes con status IN ('Procesado','Enviado','Entregado'); una orden 'Pendiente' aún no cuenta como venta.
-- El agente NO crea ni elimina órdenes, ítems, clientes, productos ni categorías con DELETE: eso se hace en el panel porque descuenta/restituye stock y valida reglas.
-- Si el usuario pide algo fuera de lo permitido, genera igualmente la consulta más cercana (el sistema la valida).
+
+class IntentType(Enum):
+    """Tipos de intención detectables en las consultas del usuario."""
+    SHOP_QUERY = "shop_query"           # Consultas de tienda: stock, precios, catálogo, pedidos
+    PRODUCT_CREATE = "product_create"   # Crear nuevos productos
+    PRODUCT_UPDATE = "product_update"   # Actualizar productos existentes (precio, stock, datos)
+    PROMOTION_CREATE = "promotion_create"  # Crear códigos promocionales, ofertas
+    PROMOTION_QUERY = "promotion_query"    # Consultar promociones existentes
+    DISCOUNT_ADVICE = "discount_advice"    # Consejos sobre descuentos, estrategias
+    MARKETING_ADVICE = "marketing_advice"  # Sugerencias de marketing, avisos, campañas
+    INVENTORY_ADVICE = "inventory_advice"  # Consejos de inventario, stock, rotación
+    REPORT_REQUEST = "report_request"      # Solicitar informes, balances, Excel
+    ORDER_MANAGEMENT = "order_management"  # Cambiar estado, consultar pedidos
+    CUSTOMER_QUERY = "customer_query"      # Consultar clientes, VIP, historial
+    GENERAL_CHAT = "general_chat"          # Conversación general, saludos, ayuda
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class IntentResult:
+    """Resultado de la clasificación de intención."""
+    intent: IntentType
+    confidence: float
+    entities: dict = field(default_factory=dict)  # Entidades extraídas (ids, nombres, porcentajes, etc.)
+    suggested_action: str = ""  # Acción sugerida para el agente
+    requires_confirmation: bool = False
+    context_hint: str = ""  # Pista de contexto para el prompt del LLM
+
+
+@dataclass
+class SessionContext:
+    """Contexto de la sesión actual del chat."""
+    messages: list = field(default_factory=list)  # Historial de mensajes
+    last_intent: Optional[IntentType] = None
+    last_entities: dict = field(default_factory=dict)
+    active_topic: Optional[str] = None  # Tema activo: "productos", "promociones", "inventario", etc.
+    pending_confirmation: Optional[dict] = None  # Acción pendiente de confirmación
+    user_preferences: dict = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+    
+    def add_message(self, role: str, content: str, intent: Optional[IntentType] = None, entities: dict = None):
+        """Añade un mensaje al historial."""
+        self.messages.append({
+            "role": role,
+            "content": content,
+            "intent": intent.value if intent else None,
+            "entities": entities or {},
+            "timestamp": datetime.now().isoformat()
+        })
+        self.updated_at = datetime.now()
+        if intent:
+            self.last_intent = intent
+        if entities:
+            self.last_entities = entities
+    
+    def get_recent_context(self, max_messages: int = 5) -> list:
+        """Obtiene los últimos N mensajes para contexto."""
+        return self.messages[-max_messages:] if self.messages else []
+    
+    def clear_topic(self):
+        """Limpia el tema activo."""
+        self.active_topic = None
+
+MAPA_TIENDA = """## LA TIENDA
+CROVN: tienda online de camisetas y ropa urbana en Colombia (precios en COP) con panel de administración. Base PostgreSQL con estas tablas:
+- products: catálogo e inventario de camisetas (categoryId->categories, supplierId->suppliers)
+- product_variants: stock por talla y color de cada producto (productId->products)
+- categories: categorías de productos
+- suppliers: proveedores del inventario
+- customers: clientes (email único, isVIP)
+- orders: pedidos de clientes (customerId->customers; status Pendiente|Procesado|Enviado|Entregado; total, discount, promoCode)
+- order_items: líneas de cada orden (orderId->orders, productId->products, quantity, price)
+- promo_codes: códigos de descuento (code, discountPct, active, maxUses, usedCount, expiresAt)
+- publications: ofertas, colecciones y noticias del carrusel de la tienda (productId->products, discountPct)
 """
+
+# --- CLASIFICACIÓN DE INTENCIONES ---
+INTENT_KEYWORDS = {
+    IntentType.GENERAL_CHAT: [
+        "hola", "buenos", "buenas", "gracias", "adios", "adiós", "chao", "bye",
+        "ayuda", "help", "qué puedes", "que puedes", "quien eres", "quién eres",
+        "como estas", "cómo estás", "que tal", "qué tal", "saludos"
+    ],
+    IntentType.PRODUCT_CREATE: [
+        "crear producto", "crea producto", "nuevo producto", "nueva camiseta",
+        "agregar producto", "agrega producto", "registrar producto", "registra producto",
+        "insertar producto", "inserta producto", "añadir producto", "anadir producto",
+        "creame un producto", "agregame un producto", "dame de alta producto",
+        "crear camiseta", "crea camiseta", "nueva remera", "agregar remera",
+        "crear item", "crea item", "nuevo item"
+    ],
+    IntentType.PRODUCT_UPDATE: [
+        "actualizar producto", "actualiza producto", "cambiar precio", "cambia precio",
+        "modificar producto", "modifica producto", "editar producto", "edita producto",
+        "actualizar stock", "actualiza stock", "cambiar stock", "cambia stock",
+        "poner precio", "poner stock", "establecer precio", "ajustar precio", "ajusta precio",
+        "subir precio", "bajar precio", "sube precio", "baja precio",
+        "actualizar precio", "actualiza precio", "modificar precio", "modifica precio",
+        "editar precio", "edita precio"
+    ],
+    IntentType.PROMOTION_CREATE: [
+        "crear codigo", "crear código", "crear promo", "crear promoción", "crear cupon", "crear cupón",
+        "crear descuento", "generar codigo", "generar código", "generar promo", "generar cupón",
+        "nuevo codigo", "nuevo código", "nueva promocion", "nueva promoción", "nuevo descuento",
+        "crear oferta", "crear codigo promocional",
+        "crea codigo", "crea código", "crea promo", "crea promoción", "crea cupón", "crea descuento",
+        "genera codigo", "genera código", "nueva promo"
+    ],
+    IntentType.PROMOTION_QUERY: [
+        "codigos", "códigos", "promociones", "promos", "descuentos", "cupones",
+        "activos", "vigentes", "expirados", "usados", "listar", "ver", "mostrar",
+        "que ofertas", "qué ofertas", "cuales son", "cuáles son", "ofertas activas",
+        "promociones activas", "codigos activos", "códigos activos",
+        "ver codigos", "ver códigos", "ver promociones", "ver ofertas"
+    ],
+    IntentType.DISCOUNT_ADVICE: [
+        "recomienda descuento", "recomendar descuento", "sugiere descuento", "sugerir descuento",
+        "consejo descuento", "consejos descuento", "estrategia descuento",
+        "que descuento", "qué descuento", "cuanto descuento", "cuánto descuento",
+        "aplicar descuento", "descuento para", "mejor descuento", "porcentaje descuento",
+        "descuento en", "descuento a", "recomienda porcentaje", "sugiere porcentaje"
+    ],
+    IntentType.MARKETING_ADVICE: [
+        "marketing", "campaña", "campana", "publicidad", "anuncio", "avisos",
+        "coleccion", "colección", "lanzamiento", "promocionar", "vender más", "vender mas",
+        "aumentar ventas", "atraer clientes", "fidelizar", "ideas marketing",
+        "sugiere marketing", "recomienda marketing", "estrategia marketing",
+        "ideas para vender", "como vender mas", "cómo vender más"
+    ],
+    IntentType.INVENTORY_ADVICE: [
+        "inventario", "rotación", "rotacion", "agotado", "bajo stock",
+        "reponer", "reposición", "reposicion", "exceso", "dead stock", "inventario muerto",
+        "qué comprar", "que comprar", "qué producir", "que producir",
+        "analiza inventario", "analizar inventario", "stock muerto",
+        "analiza stock", "analizar stock", "recomienda stock"
+    ],
+    IntentType.REPORT_REQUEST: [
+        "informe", "balance", "reporte", "excel", "exportar", "resumen",
+        "ventas por", "ranking", "estadisticas", "estadísticas", "kpi", "metricas",
+        "genera balance", "genera informe", "genera reporte", "balance semanal",
+        "balance mensual", "informe ventas"
+    ],
+    IntentType.ORDER_MANAGEMENT: [
+        "cambiar estado", "cambia estado", "marcar estado", "marca estado",
+        "enviar pedido", "envia pedido", "procesar pedido", "procesa pedido",
+        "entregar pedido", "entrega pedido", "anular pedido", "anula pedido",
+        "cancelar pedido", "cancela pedido", "rastrear pedido", "rastreo pedido",
+        "donde esta pedido", "dónde está pedido", "estado del pedido", "estado pedido",
+        "marcar como enviado", "marcar como entregado", "marcar como procesado",
+        "poner estado"
+    ],
+    IntentType.CUSTOMER_QUERY: [
+        "cliente", "clientes", "vip", "correo", "email", "telefono", "teléfono",
+        "comprador", "compradores", "historial", "pedidos de", "buscar cliente"
+    ],
+    IntentType.SHOP_QUERY: [
+        "cuanto cuesta", "cuánto cuesta", "precio de", "precio del",
+        "stock de", "stock del", "disponible", "hay stock", "tengo stock",
+        "catalogo", "catálogo", "productos", "camisetas", "tallas", "colores",
+        "buscar", "encontrar", "ver", "mostrar", "lista", "listado",
+        "que hay", "qué hay", "que tienen", "qué tienen",
+        "cuanto stock", "cuánto stock", "stock de", "cuanto hay", "cuánto hay",
+        "precio producto", "precio camiseta", "stock camiseta"
+    ],
+}
+
+# Pesos para cada tipo de intención (para desempatar)
+INTENT_PRIORITY = {
+    IntentType.PRODUCT_CREATE: 100,
+    IntentType.PROMOTION_CREATE: 95,
+    IntentType.ORDER_MANAGEMENT: 90,
+    IntentType.PRODUCT_UPDATE: 85,
+    IntentType.REPORT_REQUEST: 80,
+    IntentType.DISCOUNT_ADVICE: 75,
+    IntentType.MARKETING_ADVICE: 75,
+    IntentType.INVENTORY_ADVICE: 75,
+    IntentType.PROMOTION_QUERY: 70,
+    IntentType.CUSTOMER_QUERY: 65,
+    IntentType.SHOP_QUERY: 60,
+    IntentType.GENERAL_CHAT: 50,
+    IntentType.UNKNOWN: 0,
+}
+
+REGLAS_COMUN = """## REGLAS
+- Columnas camelCase (createdAt, customerId, discountPct, isVIP...) sin comillas dobles: el sistema las entrecomilla. Nunca uses comillas dobles en la consulta.
+- Texto: LOWER(col) LIKE '%valor%'. Fechas 'YYYY-MM-DD' tal cual las dice el usuario, sin restar días. Hoy: CURRENT_DATE.
+- Ventas e ingresos = órdenes con status IN ('Procesado','Enviado','Entregado'); 'Pendiente' aún no es venta.
+"""
+
+REGLAS_ESCRITURA = """- Timestamps actuales: NOW(). En UPDATE/INSERT usa %s con los valores en parametros (sin % literal en esas consultas).
+- INSERT: solo las columnas que el usuario mencionó (con una basta). No inventes datos ni pidas más: el sistema completa las obligatorias. No incluyas updatedAt ni createdAt.
+- No se crean ni borran órdenes, ítems, clientes, productos ni categorías con DELETE (se hace en el panel).
+- Si piden algo no permitido, genera la consulta más cercana (el sistema la valida).
+"""
+
+# Tablas que, además de la pertinente, hacen falta para los JOIN habituales.
+RELACIONES_UTILES = {
+    "orders": ("customers",),
+    "order_items": ("orders", "products"),
+    "product_variants": ("products",),
+    "publications": ("products",),
+}
 
 # Cada ejemplo: (pregunta, sql, parametros)
 TABLAS = {
@@ -158,9 +356,10 @@ TABLAS = {
             "Estado: Inactivo si active = false; Expirado si \"expiresAt\" < NOW(); Agotado si \"maxUses\" no es NULL y \"usedCount\" >= \"maxUses\"; si no, Activo.",
             "Para desactivar usa UPDATE ... SET active = false (no DELETE) salvo que pida eliminar.",
             "Enviar un código por correo ('envía el código X a correo@dominio.com') lo resuelve el sistema aparte; no generes SQL para eso.",
+            "IMPORTANT: Al crear código promocional, SIEMPRE genera JSON con: accion: 'INSERT', query: 'INSERT INTO promo_codes (code, \"discountPct\", active, \"maxUses\", \"usedCount\", \"updatedAt\") VALUES (%s, %s, true, %s, 0, NOW());', parametros: [\"CODIGO\", 20, null] (usar null para maxUses ilimitado). Si no da código, omite 'code' de columnas y usa DEFAULT.",
         ],
         "ejemplos": [
-            ("códigos de promoción activos y utilizables", """SELECT code, "discountPct", "maxUses", "usedCount", "expiresAt" FROM promo_codes WHERE active = true AND ("expiresAt" IS NULL OR "expiresAt" >= NOW()) AND ("maxUses" IS NULL OR "usedCount" < "maxUses") ORDER BY "createdAt" DESC;""", []),
+            ("códigos de promoción activos", """SELECT code, "discountPct", "maxUses", "usedCount", "expiresAt" FROM promo_codes WHERE active = true AND ("expiresAt" IS NULL OR "expiresAt" >= NOW()) AND ("maxUses" IS NULL OR "usedCount" < "maxUses") ORDER BY "createdAt" DESC;""", []),
             ("todos los códigos con su estado", """SELECT code, "discountPct", "usedCount", "maxUses", "expiresAt", CASE WHEN NOT active THEN 'Inactivo' WHEN "expiresAt" IS NOT NULL AND "expiresAt" < NOW() THEN 'Expirado' WHEN "maxUses" IS NOT NULL AND "usedCount" >= "maxUses" THEN 'Agotado' ELSE 'Activo' END AS estado FROM promo_codes ORDER BY "createdAt" DESC;""", []),
             ("códigos expirados", """SELECT code, "discountPct", "expiresAt" FROM promo_codes WHERE "expiresAt" IS NOT NULL AND "expiresAt" < NOW();""", []),
             ("código promocional más usado", """SELECT code, "discountPct", "usedCount" FROM promo_codes ORDER BY "usedCount" DESC LIMIT 1;""", []),
@@ -172,6 +371,12 @@ TABLAS = {
              ["VERANO20", 20, 50]),
             ("crea el código OTOÑO15", """INSERT INTO promo_codes (code) VALUES (%s);""", ["OTOÑO15"]),
             ("crea un código con 15% de descuento", """INSERT INTO promo_codes (discountPct) VALUES (%s);""", [15]),
+            ("crea código promocional BLACKFRIDAY 30% max 100 usos",
+             """INSERT INTO promo_codes (code, "discountPct", active, "maxUses", "usedCount", "updatedAt") VALUES (%s, %s, true, %s, 0, NOW());""",
+             ["BLACKFRIDAY", 30, 100]),
+            ("crea código NAVIDAD25 con 25% sin límite de usos",
+             """INSERT INTO promo_codes (code, "discountPct", active, "maxUses", "usedCount", "updatedAt") VALUES (%s, %s, true, NULL, 0, NOW());""",
+             ["NAVIDAD25", 25, None]),
             ("desactiva el código PROMO45", """UPDATE promo_codes SET active = false, "updatedAt" = NOW() WHERE UPPER(code) = UPPER(%s);""", ["PROMO45"]),
             ("elimina el código VERANO10", """DELETE FROM promo_codes WHERE UPPER(code) = UPPER(%s);""", ["VERANO10"]),
         ],
@@ -222,9 +427,10 @@ TABLAS = {
 }
 
 _VERBOS = {
-    "INSERT": ("crea", "crear", "agrega", "agregar", "registra", "nuevo", "nueva", "anade"),
-    "UPDATE": ("actualiza", "cambia", "modifica", "marca", "desactiva", "activa", "ajusta", "edita"),
-    "DELETE": ("elimina", "borra", "quita"),
+    "INSERT": ("crea", "crear", "creame", "agrega", "agregar", "registra", "registrar", "inserta", "nuevo", "nueva", "anade", "anadir"),
+    "UPDATE": ("actualiza", "actualizar", "cambia", "cambiar", "modifica", "modificar", "marca", "marcar", "desactiva", "desactivar",
+               "activa", "activar", "ajusta", "ajustar", "edita", "editar", "pon", "poner"),
+    "DELETE": ("elimina", "eliminar", "borra", "borrar", "quita", "quitar"),
 }
 
 
@@ -237,6 +443,12 @@ def _accion(sql):
     return sql.lstrip().split()[0].upper()
 
 
+def es_escritura(texto):
+    """True si la petición parece crear, modificar o borrar datos; ante la duda conviene tratarla como escritura."""
+    palabras = set(re.findall(r"\w+", _norm(texto)))
+    return any(v in palabras for vs in _VERBOS.values() for v in vs)
+
+
 def tablas_relevantes(texto, max_tablas=3):
     """Tablas ordenadas por coincidencia de palabras clave con el texto del usuario."""
     t = _norm(texto)
@@ -247,7 +459,17 @@ def tablas_relevantes(texto, max_tablas=3):
             puntajes.append((-puntaje, orden, nombre))
     if not puntajes:
         return ["products", "orders"]
-    return [n for _, _, n in sorted(puntajes)[:max_tablas]]
+    puntajes.sort()
+    return [n for p, _, n in puntajes[:max_tablas] if -p * 2 >= -puntajes[0][0]]
+
+
+def tablas_con_detalle(texto):
+    """Tablas cuyas columnas se envían al modelo: las pertinentes y, al consultar, las de sus JOIN habituales."""
+    elegidas = tablas_relevantes(texto, max_tablas=2)
+    if not es_escritura(texto):
+        for nombre in list(elegidas):
+            elegidas += [t for t in RELACIONES_UTILES.get(nombre, ()) if t not in elegidas]
+    return elegidas
 
 
 def _elegir_ejemplos(texto, ejemplos, k):
@@ -270,18 +492,305 @@ def _sin_comillas(texto):
     return texto.replace('"', "")
 
 
-def construir_contexto(texto):
-    """Reglas globales + reglas y ejemplos solo de las tablas relevantes (cabe en el contexto del modelo)."""
-    partes = [_sin_comillas(REGLAS_GLOBALES), "## 3b. TABLAS RELEVANTES PARA ESTA PETICIÓN (sigue sus reglas y el patrón de sus ejemplos)"]
-    for i, nombre in enumerate(tablas_relevantes(texto)):
+_RE_REGLA_ESCRITURA = re.compile(r"\b(INSERT|UPDATE|DELETE)\b|Cambiar estado|sistema genera|Enviar un código|code en MAYÚSCULAS", re.IGNORECASE)
+
+
+def construir_contexto(texto, escritura=None, intent_result: Optional[IntentResult] = None, session_context: Optional[SessionContext] = None):
+    """
+    Construye el contexto para el LLM incluyendo:
+    - Reglas de negocio
+    - Ejemplos relevantes
+    - Información de intención clasificada
+    - Contexto de sesión (historial reciente)
+    """
+    if escritura is None:
+        escritura = es_escritura(texto)
+    
+    partes = [_sin_comillas(REGLAS_COMUN + (REGLAS_ESCRITURA if escritura else ""))]
+    
+    # Añadir información de intención si está disponible
+    if intent_result:
+        partes.append(f"### INTENCIÓN DETECTADA: {intent_result.intent.value.upper()}")
+        partes.append(f"Confianza: {intent_result.confidence:.0%}")
+        partes.append(f"Acción sugerida: {intent_result.suggested_action}")
+        if intent_result.context_hint:
+            partes.append(f"Contexto: {intent_result.context_hint}")
+        if intent_result.entities:
+            partes.append(f"Entidades extraídas: {json.dumps(intent_result.entities, ensure_ascii=False)}")
+        if intent_result.requires_confirmation:
+            partes.append("⚠️ REQUIERE CONFIRMACIÓN DEL USUARIO ANTES DE EJECUTAR")
+        partes.append("")  # Línea en blanco
+    
+    # Añadir contexto de sesión (últimos 3 mensajes)
+    if session_context and session_context.messages:
+        recent = session_context.get_recent_context(3)
+        if recent:
+            partes.append("### CONTEXTO DE SESIÓN (últimos mensajes):")
+            for msg in recent:
+                role = "Usuario" if msg["role"] == "user" else "Asistente"
+                partes.append(f"- {role}: {msg['content'][:100]}{'...' if len(msg['content']) > 100 else ''}")
+            partes.append("")
+    
+    # Tablas relevantes y ejemplos
+    for i, nombre in enumerate(tablas_relevantes(texto, max_tablas=2)):
         datos = TABLAS[nombre]
-        partes.append(f"### {nombre}: {datos['descripcion']}\nOperaciones permitidas: {datos['operaciones']}")
-        partes.extend(f"- {_sin_comillas(r)}" for r in datos["reglas"])
-        partes.append("Ejemplos:")
-        for pregunta, sql, params in _elegir_ejemplos(texto, datos["ejemplos"], 6 if i == 0 else 3):
+        cabecera = f"### {nombre}: {datos['descripcion']}"
+        partes.append(cabecera + (f" Permitido: {datos['operaciones']}" if escritura else ""))
+        partes.extend(f"- {_sin_comillas(r)}" for r in datos["reglas"] if escritura or not _RE_REGLA_ESCRITURA.search(r))
+        ejemplos = datos["ejemplos"] if escritura else [e for e in datos["ejemplos"] if _accion(e[1]) == "SELECT"]
+        for pregunta, sql, params in _elegir_ejemplos(texto, ejemplos, 3 if i == 0 else 2):
             extra = f" | parametros: {json.dumps(params, ensure_ascii=False)}" if params else ""
-            partes.append(f'- {pregunta} -> {_sin_comillas(sql)}{extra}')
+            partes.append(f"- {pregunta} -> {_sin_comillas(sql)}{extra}")
+    
     return "\n".join(partes)
+
+
+_RUIDO = {"mostrar", "muestra", "muestrame", "lista", "listado", "listar", "ver", "dame", "dime", "quiero", "necesito", "cual", "cuales",
+          "que", "tenemos", "tengo", "hay", "existen", "el", "la", "los", "las", "un", "una", "unos", "unas", "de", "del", "en", "por",
+          "favor", "todos", "todas", "me", "mi", "mis", "tienda", "inventario", "y", "a", "al", "para"}
+_PLURALES = (("ones", 2), ("ores", 2), ("enes", 2), ("eres", 2))
+
+
+def _raiz(palabra):
+    for fin, quitar in _PLURALES:
+        if palabra.endswith(fin):
+            return palabra[:-quitar]
+    return palabra[:-1] if len(palabra) > 3 and palabra.endswith("s") and not palabra.endswith("ss") else palabra
+
+
+def _clave(texto):
+    """Palabras significativas de una pregunta (sin relleno ni plurales) para reconocer preguntas ya conocidas."""
+    palabras = re.findall(r"[a-z0-9]+(?:[@.][a-z0-9]+)*", _norm(texto))
+    return frozenset(_raiz(p) for p in palabras if p not in _RUIDO)
+
+
+def _extraer_entidades(texto: str, intent: IntentType) -> dict:
+    """Extrae entidades relevantes del texto según la intención."""
+    entidades = {}
+    texto_lower = texto.lower()
+    
+    # Extraer IDs numéricos
+    ids = re.findall(r'\b(\d+)\b', texto)
+    if ids:
+        entidades["ids"] = [int(x) for x in ids]
+    
+    # Extraer porcentajes
+    pcts = re.findall(r'(\d+)\s*%', texto)
+    if pcts:
+        entidades["porcentajes"] = [int(x) for x in pcts]
+    
+    # Extraer emails
+    emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', texto)
+    if emails:
+        entidades["emails"] = emails
+    
+    # Extraer códigos (mayúsculas con guiones/números)
+    codigos = re.findall(r'\b([A-Z0-9]{4,}(?:-[A-Z0-9]+)?)\b', texto.upper())
+    if codigos:
+        entidades["codigos"] = codigos
+    
+    # Extraer precios (COP)
+    precios = re.findall(r'[\$]?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)', texto)
+    if precios:
+        entidades["precios"] = [float(p.replace(".", "").replace(",", ".")) for p in precios]
+    
+    # Entidades específicas por intención
+    if intent in (IntentType.PRODUCT_CREATE, IntentType.PRODUCT_UPDATE):
+        # Buscar categoría
+        for cat in ["camiseta", "camisetas", "gorra", "gorras", "pantalon", "pantalones", "hoodie", "hoodies", "sudadera", "sudaderas"]:
+            if cat in texto_lower:
+                entidades["categoria_sugerida"] = cat
+                break
+        # Buscar tallas
+        tallas_encontradas = [t for t in TALLAS if t.lower() in texto_lower]
+        if tallas_encontradas:
+            entidades["tallas"] = tallas_encontradas
+        # Buscar colores
+        colores = ["negro", "blanco", "rojo", "gris", "azul", "verde", "beige", "blanco", "negro"]
+        colores_encontrados = [c for c in colores if c in texto_lower]
+        if colores_encontrados:
+            entidades["colores"] = colores_encontrados
+    
+    if intent == IntentType.DISCOUNT_ADVICE:
+        if entidades.get("porcentajes"):
+            entidades["descuento_sugerido"] = entidades["porcentajes"][0]
+    
+    if intent == IntentType.PROMOTION_CREATE:
+        if entidades.get("porcentajes"):
+            entidades["descuento_pct"] = entidades["porcentajes"][0]
+        if entidades.get("codigos"):
+            entidades["codigo_sugerido"] = entidades["codigos"][0]
+    
+    return entidades
+
+
+def clasificar_intencion(texto: str, contexto: Optional[SessionContext] = None) -> IntentResult:
+    """
+    Clasifica la intención del usuario basándose en palabras clave y contexto.
+    Retorna un IntentResult con la intención, confianza y entidades extraídas.
+    """
+    if not texto or not texto.strip():
+        return IntentResult(
+            intent=IntentType.UNKNOWN,
+            confidence=0.0,
+            suggested_action="Pide al usuario que reformule su consulta."
+        )
+    
+    texto_norm = _norm(texto)
+    palabras = set(re.findall(r"\w+", texto_norm))
+    
+    # Detectar verbos de acción al inicio (primeras 3-4 palabras)
+    primeras_palabras = re.findall(r"\w+", texto_norm)[:4]
+    verbos_inicio = {"crear", "crea", "nuevo", "nueva", "agregar", "agrega", "registrar", "registra",
+                     "actualizar", "actualiza", "cambiar", "cambia", "modificar", "modifica",
+                     "editar", "edita", "poner", "pon", "establecer", "ajustar", "ajusta",
+                     "generar", "genera", "listar", "ver", "mostrar", "buscar", "encontrar",
+                     "recomendar", "recomienda", "recomiendame", "recomiendanos",
+                     "sugerir", "sugiere", "sugiereme", "sugierenos",
+                     "analiza", "analizar", "analizame",
+                     "cambiar", "cambia", "marcar", "marca", "enviar", "envia", "procesar",
+                     "entregar", "entrega", "anular", "anula", "cancelar", "cancela"}
+    
+    accion_detectada = None
+    for p in primeras_palabras:
+        if p in verbos_inicio:
+            accion_detectada = p
+            break
+    
+    # Puntuación por intención
+    scores = {}
+    for intent_type, keywords in INTENT_KEYWORDS.items():
+        score = 0
+        for kw in keywords:
+            if kw in texto_norm:
+                # Bonus si la palabra clave aparece al inicio (primera acción)
+                inicio = texto_norm.find(kw)
+                if inicio < 30:  # En los primeros 30 caracteres
+                    score += 8
+                else:
+                    score += 3
+                # Bonus extra si es coincidencia exacta de palabra
+                if kw in palabras:
+                    score += 2
+            # También buscar palabras individuales de la frase clave
+            kw_palabras = kw.split()
+            if len(kw_palabras) > 1:
+                coincidencias = sum(1 for pw in kw_palabras if pw in palabras)
+                if coincidencias >= len(kw_palabras) * 0.7:  # 70% de las palabras coinciden
+                    score += coincidencias * 2
+        
+        # BOOST CRÍTICO: Si la acción detectada al inicio coincide con la intención
+        if accion_detectada:
+            verbos_por_intent = {
+                IntentType.PRODUCT_CREATE: {"crear", "crea", "nuevo", "nueva", "agregar", "agrega", "registrar", "registra"},
+                IntentType.PRODUCT_UPDATE: {"actualizar", "actualiza", "cambiar", "cambia", "modificar", "modifica", "editar", "edita", "poner", "ajustar", "ajusta"},
+                IntentType.PROMOTION_CREATE: {"crear", "crea", "generar", "genera"},
+                IntentType.PROMOTION_QUERY: {"listar", "ver", "mostrar", "buscar", "encontrar"},
+                IntentType.DISCOUNT_ADVICE: {"recomendar", "recomienda", "sugerir", "sugiere"},
+                IntentType.MARKETING_ADVICE: {"sugerir", "sugiere", "recomendar", "recomienda"},
+                IntentType.INVENTORY_ADVICE: {"analizar", "analiza"},
+                IntentType.REPORT_REQUEST: {"generar", "genera"},
+                IntentType.ORDER_MANAGEMENT: {"cambiar", "cambia", "marcar", "marca", "enviar", "envia", "procesar", "entregar", "anular", "anula", "cancelar", "cancela"},
+                IntentType.SHOP_QUERY: {"buscar", "encontrar", "ver", "mostrar", "listar"},
+                IntentType.CUSTOMER_QUERY: {"buscar"},
+            }
+            if intent_type in verbos_por_intent and accion_detectada in verbos_por_intent[intent_type]:
+                score += 20  # Boost muy fuerte para acción correcta al inicio
+        
+        scores[intent_type] = score
+    
+    # Boost por contexto de sesión
+    if contexto and contexto.last_intent:
+        # Si la intención anterior fue de creación/actualización, priorizar confirmaciones
+        if contexto.last_intent in (IntentType.PRODUCT_CREATE, IntentType.PROMOTION_CREATE, IntentType.PRODUCT_UPDATE):
+            # Palabras de confirmación
+            confirm_words = {"si", "sí", "confirmo", "dale", "hazlo", "ok", "vale", "correcto", "exacto"}
+            if any(w in palabras for w in confirm_words):
+                scores[contexto.last_intent] = scores.get(contexto.last_intent, 0) + 5
+                entidades = _extraer_entidades(texto, contexto.last_intent)
+                return IntentResult(
+                    intent=contexto.last_intent,
+                    confidence=0.9,
+                    entities=entidades,
+                    suggested_action="Confirmar acción pendiente",
+                    requires_confirmation=True,
+                    context_hint=f"El usuario confirma la {contexto.last_intent.value.replace('_', ' ')} anterior."
+                )
+    
+    # Encontrar la intención con mayor score
+    if not scores or max(scores.values()) == 0:
+        return IntentResult(
+            intent=IntentType.GENERAL_CHAT,
+            confidence=0.3,
+            suggested_action="Responder de forma conversacional o pedir clarificación."
+        )
+    
+    # Desempatar por prioridad
+    max_score = max(scores.values())
+    candidatos = [intent for intent, score in scores.items() if score == max_score]
+    intent_ganadora = max(candidatos, key=lambda x: INTENT_PRIORITY.get(x, 0))
+    
+    confidence = min(0.9, 0.4 + (max_score * 0.1))
+    entidades = _extraer_entidades(texto, intent_ganadora)
+    
+    # Generar acción sugerida y context_hint según intención
+    suggested_actions = {
+        IntentType.SHOP_QUERY: "Consultar catálogo/inventario via API o SQL",
+        IntentType.PRODUCT_CREATE: "Crear producto via API REST (multipart/form-data para imágenes)",
+        IntentType.PRODUCT_UPDATE: "Actualizar producto via API REST",
+        IntentType.PROMOTION_CREATE: "Crear código promocional u oferta via API",
+        IntentType.PROMOTION_QUERY: "Listar promociones activas/inactivas",
+        IntentType.DISCOUNT_ADVICE: "Dar consejo estratégico basado en datos de ventas/stock",
+        IntentType.MARKETING_ADVICE: "Sugerir campañas, avisos, colecciones via informes.py",
+        IntentType.INVENTORY_ADVICE: "Analizar stock, rotación, dead stock via SQL/API",
+        IntentType.REPORT_REQUEST: "Generar informe Excel via informes.py",
+        IntentType.ORDER_MANAGEMENT: "Gestionar pedidos (estado, consulta) via API",
+        IntentType.CUSTOMER_QUERY: "Consultar clientes, VIP, historial via API/SQL",
+        IntentType.GENERAL_CHAT: "Responder conversacionalmente",
+    }
+    
+    context_hints = {
+        IntentType.SHOP_QUERY: "El usuario quiere ver productos, stock o precios. Usa API shop o SQL SELECT.",
+        IntentType.PRODUCT_CREATE: "El usuario quiere crear un producto. Necesita: nombre, categoría, precio, stock, talla, color. Las imágenes van por multipart.",
+        IntentType.PRODUCT_UPDATE: "El usuario quiere modificar un producto existente. Identifica el ID y los campos a cambiar.",
+        IntentType.PROMOTION_CREATE: "El usuario quiere crear un código descuento u oferta. Código en MAYÚSCULAS, descuento 1-90%.",
+        IntentType.PROMOTION_QUERY: "El usuario quiere ver códigos u ofertas existentes. Filtra por active, expiresAt, maxUses.",
+        IntentType.DISCOUNT_ADVICE: "El usuario pide consejo sobre descuentos. Analiza ventas, stock, margen para recomendar.",
+        IntentType.MARKETING_ADVICE: "El usuario quiere ideas de marketing. Usa informes.ideas_marketing() con datos reales.",
+        IntentType.INVENTORY_ADVICE: "El usuario quiere optimizar inventario. Analiza rotación, stock bajo, dead stock.",
+        IntentType.REPORT_REQUEST: "El usuario quiere un informe/balance. Usa informes.datos_balance() y informes.construir_excel().",
+        IntentType.ORDER_MANAGEMENT: "El usuario quiere gestionar un pedido. Estados válidos: Pendiente, Procesado, Enviado, Entregado.",
+        IntentType.CUSTOMER_QUERY: "El usuario consulta clientes. Une con orders para ver pedidos y gasto total.",
+        IntentType.GENERAL_CHAT: "Conversación general. Responde amablemente y ofrece ayuda específica.",
+    }
+    
+    return IntentResult(
+        intent=intent_ganadora,
+        confidence=confidence,
+        entities=entidades,
+        suggested_action=suggested_actions.get(intent_ganadora, "Procesar según contexto"),
+        context_hint=context_hints.get(intent_ganadora, ""),
+        requires_confirmation=intent_ganadora in (IntentType.PRODUCT_CREATE, IntentType.PROMOTION_CREATE, IntentType.ORDER_MANAGEMENT)
+    )
+
+
+_ATAJOS = None
+
+
+def atajo_sql(texto):
+    """SQL de un ejemplo conocido si la pregunta es equivalente (mismas palabras significativas); None si no."""
+    global _ATAJOS
+    if _ATAJOS is None:
+        _ATAJOS = {}
+        for datos in TABLAS.values():
+            for pregunta, sql, params in datos["ejemplos"]:
+                clave = _clave(pregunta)
+                if clave and not params and _accion(sql) == "SELECT":
+                    _ATAJOS.setdefault(clave, sql)
+    if es_escritura(texto):
+        return None
+    clave = _clave(texto)
+    return _ATAJOS.get(clave) if clave else None
 
 
 def sugerencias(nombre_tabla):

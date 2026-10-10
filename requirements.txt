@@ -8,3 +8,10 @@ streamlit-mic-recorder
 setuptools
 gTTS
 requests
+openpyxl
+pandas
+numpy
+scipy
+sounddevice
+certifi
+httpx

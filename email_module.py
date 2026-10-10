@@ -1,5 +1,7 @@
 import os
+import re
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
@@ -104,6 +106,35 @@ def enviar_codigo_promocional(destinatario, codigo, descuento, expira=None, nomb
             s.login(SMTP_USER, SMTP_PASS)
             s.sendmail(SMTP_FROM, destinatario, msg.as_string())
         return True, f"Código {codigo} enviado a {destinatario}"
+    except Exception as e:
+        return False, f"No se pudo enviar el correo: {e}"
+
+
+def enviar_informe(destinatario, asunto, texto, cuerpo_html, ruta_adjunto=None):
+    """Envía un informe por correo con su Excel adjunto; devuelve (ok, mensaje)."""
+    if not SMTP_USER or not SMTP_PASS:
+        return False, "SMTP_USER/SMTP_PASS no configurados en .env"
+    if not re.fullmatch(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", destinatario or ""):
+        return False, "El correo de destino no es válido."
+    msg = MIMEMultipart("mixed")
+    msg["From"] = SMTP_FROM
+    msg["To"] = destinatario
+    msg["Subject"] = asunto
+    cuerpo = MIMEMultipart("alternative")
+    cuerpo.attach(MIMEText(texto, "plain", "utf-8"))
+    cuerpo.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+    msg.attach(cuerpo)
+    if ruta_adjunto:
+        with open(ruta_adjunto, "rb") as f:
+            adjunto = MIMEApplication(f.read(), _subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        adjunto.add_header("Content-Disposition", "attachment", filename=os.path.basename(ruta_adjunto))
+        msg.attach(adjunto)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_FROM, destinatario, msg.as_string())
+        return True, f"Informe enviado a {destinatario}"
     except Exception as e:
         return False, f"No se pudo enviar el correo: {e}"
 
