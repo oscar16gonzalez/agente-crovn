@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_MODE = os.getenv("DB_MODE", "neon").strip().lower()
-NEON_DATABASE_URL = os.getenv("NEON_DATABASE_URL")
+DB_MODE = os.getenv("DB_MODE", "aiven").strip().lower()
+AIVEN_DATABASE_URL = os.getenv("AIVEN_DATABASE_URL")
 LOCAL_DATABASE_URL = os.getenv("LOCAL_DATABASE_URL")
 
 
@@ -16,7 +16,7 @@ def get_connection():
     if DB_MODE == "local":
         var, url = "LOCAL_DATABASE_URL", LOCAL_DATABASE_URL
     else:
-        var, url = "NEON_DATABASE_URL", NEON_DATABASE_URL
+        var, url = "AIVEN_DATABASE_URL", AIVEN_DATABASE_URL
     if not url:
         raise ValueError(f"{var} no está configurada en el archivo .env")
     conn = psycopg2.connect(url)
@@ -243,6 +243,7 @@ def completar_insert(query, parametros):
 
 
 CAMELCAS = ["createdAt", "updatedAt", "customerId", "productId", "orderId", "categoryId", "supplierId", "costPrice", "profitPct", "colorHex", "discountPct", "maxUses", "usedCount", "expiresAt", "publishedAt", "isVIP", "promoCode"]
+
 
 def _entrecomillar_camelcase(query):
     import re
