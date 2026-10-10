@@ -1,15 +1,15 @@
 {
-  "preset": "mistral",
-  "acento": "#fa520f",
-  "acento2": "#ffb000",
-  "fondo": "#12100e",
-  "texto": "#f5efe8",
-  "degradado": true,
+  "preset": "grok",
+  "acento": "#f5f5f5",
+  "acento2": "#f7f7f7",
+  "fondo": "#000000",
+  "texto": "#fafafa",
+  "degradado": false,
   "fuente": "Inter",
   "radio": "Moderno",
   "ancho": "Normal",
   "fondo_estilo": "Aurora",
   "brillo": true,
   "animaciones": true,
-  "icono": "🧠"
+  "icono": "💀"
 }

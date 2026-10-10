@@ -19,7 +19,7 @@ import numpy as np
 try:
     import sounddevice as sd
     PORTAUDIO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     sd = None
     PORTAUDIO_AVAILABLE = False
 

@@ -1,6 +1,6 @@
 {
-  "activo": true,
-  "asistente": "hey jarvis",
-  "usuario": "",
-  "voz": "Paulina (Español (México))"
+  "activo": false,
+  "asistente": "hey Jarvis",
+  "usuario": "Oscar",
+  "voz": "Automática"
 }

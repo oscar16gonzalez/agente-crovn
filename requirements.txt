@@ -3,6 +3,7 @@ ollama
 psycopg2-binary
 pyttsx3
 streamlit
+streamlit-cookies-controller==0.0.4
 python-dotenv
 streamlit-mic-recorder
 setuptools

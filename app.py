@@ -4,7 +4,7 @@ import tempfile
 import time as _time
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 import streamlit as st
 import streamlit.components.v1 as components
 from gtts import gTTS
@@ -40,6 +40,121 @@ TEMA = temas.resolver(TEMA_CFG)
 ICONO = TEMA["icono"]
 st.markdown(temas.css_tema(TEMA), unsafe_allow_html=True)
 st.markdown(CSS_BASE, unsafe_allow_html=True)
+
+from api_client import get_api_client, set_api_token
+from streamlit_cookies_controller import CookieController
+
+api = get_api_client()
+cookie_controller = CookieController(key="auth_cookie_controller")
+cookie_secure = (st.context.url or "").startswith("https://")
+cookie_values = cookie_controller.getAll()
+if not isinstance(cookie_values, dict):
+    cookie_values = {}
+if "api_token" not in st.session_state:
+    st.session_state.api_token = None
+
+if not st.session_state.api_token and cookie_values.get("crovn_auth_token"):
+    cookie_token = cookie_values["crovn_auth_token"]
+    set_api_token(cookie_token)
+
+    async def verificar_sesion():
+        return await api._request("GET", "/api/auth/me")
+
+    loop = asyncio.new_event_loop()
+    try:
+        validacion = loop.run_until_complete(verificar_sesion())
+    finally:
+        loop.close()
+    if validacion.ok:
+        usuario = (validacion.data or {}).get("user", {})
+        st.session_state.api_token = cookie_token
+        st.session_state.api_user = usuario.get("name", usuario.get("username", "admin"))
+    elif (validacion.error or "").startswith("HTTP 401"):
+        cookie_controller.remove("crovn_auth_token", secure=cookie_secure)
+        set_api_token(None)
+    else:
+        st.session_state.login_error = "No se pudo verificar la sesión. Comprueba la conexión e inténtalo de nuevo."
+
+if not st.session_state.api_token:
+    if st.session_state.pop("clear_login_password", False):
+        st.session_state.login_password = ""
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"], .craneo-flotante { display: none !important; }
+    [data-testid="stMainBlockContainer"] { max-width: 1060px !important; min-height: 88vh; display: flex; align-items: center; }
+    .st-key-login-shell { width: 100%; }
+    .st-key-login-shell [data-testid="stHorizontalBlock"] { align-items: center; gap: clamp(2rem, 8vw, 7rem); }
+    .login-intro { max-width: 440px; padding: 1rem 0; }
+    .login-intro .marca { margin-bottom: 3rem; }
+    .login-eyebrow { color: var(--ac-vivo); font-size: .72rem; font-weight: 600; text-transform: uppercase; letter-spacing: .16em; }
+    .login-intro h1 { color: var(--texto); font-size: clamp(2.4rem, 5vw, 4rem); line-height: 1.04; margin: .8rem 0 1rem; }
+    .login-intro p { color: var(--muted); font-size: 1rem; line-height: 1.75; max-width: 390px; }
+    .st-key-login_panel { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--r-lg); padding: clamp(1.4rem, 3vw, 2.2rem); box-shadow: 0 24px 70px rgba(var(--sombra-rgb), calc(var(--sa) * 1.4)); }
+    .st-key-login_panel h2 { color: var(--texto); font-size: 1.45rem; margin: 0 0 .35rem; }
+    .st-key-login_panel [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+    .st-key-login_panel [data-testid="stForm"] { border: 0; padding: 0; }
+    .st-key-login_panel [data-testid="stTextInput"] input { min-height: 2.8rem; color: var(--texto) !important; background: var(--inset) !important; border-color: var(--borde) !important; }
+    .st-key-login_panel [data-testid="stTextInput"] input::placeholder { color: var(--muted) !important; opacity: 1; -webkit-text-fill-color: var(--muted); }
+    .st-key-login_panel .login-security { color: var(--tenue); font-size: .76rem; margin-top: 1rem; text-align: center; }
+    @media (max-width: 720px) {
+      [data-testid="stMainBlockContainer"] { min-height: auto; display: block; padding-top: 8vh; }
+      .st-key-login-shell [data-testid="stHorizontalBlock"] { gap: 1rem; }
+      .login-intro { padding: 0 0 .5rem; }
+      .login-intro .marca { margin-bottom: 1.7rem; }
+      .login-intro h1 { font-size: 2.35rem; }
+      .login-intro p { font-size: .9rem; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    with st.container(key="login-shell"):
+        intro, acceso = st.columns([1.1, .9], gap="large")
+        with intro:
+            st.markdown(marca_html(ICONO), unsafe_allow_html=True)
+            st.markdown(
+                '<div class="login-intro"><div class="login-eyebrow">Tu espacio de trabajo</div>'
+                '<h1>Tu tienda, en conversación.</h1>'
+                '<p>Consulta inventario, pedidos y clientes. CROVN convierte tus preguntas en acciones claras para el día a día.</p></div>',
+                unsafe_allow_html=True,
+            )
+        with acceso, st.container(key="login_panel"):
+            st.markdown('<h2>Bienvenido de nuevo</h2><p>Inicia sesión para abrir tu asistente.</p>', unsafe_allow_html=True)
+            with st.form("login_form"):
+                auth_user = st.text_input("Usuario", placeholder="Tu usuario", autocomplete="username", key="login_username")
+                auth_pass = st.text_input("Contraseña", type="password", placeholder="Tu contraseña", autocomplete="current-password", key="login_password")
+                enviar_login = st.form_submit_button("Entrar al chat", type="primary", icon=":material/arrow_forward:", use_container_width=True)
+            if enviar_login:
+                if not auth_user or not auth_pass:
+                    st.session_state.login_error = "Escribe tu usuario y contraseña para continuar."
+                else:
+                    async def do_login():
+                        return await api._request("POST", "/api/auth/login", json={"username": auth_user, "password": auth_pass})
+                    loop = asyncio.new_event_loop()
+                    try:
+                        resp = loop.run_until_complete(do_login())
+                    finally:
+                        loop.close()
+                    if resp.ok and resp.data and resp.data.get("token"):
+                        st.session_state.api_token = resp.data["token"]
+                        st.session_state.api_user = resp.data.get("user", {}).get("name", auth_user)
+                        st.session_state.login_error = None
+                        if isinstance(cookie_controller.getAll(), dict):
+                            cookie_controller.set(
+                                "crovn_auth_token", st.session_state.api_token,
+                                expires=datetime.now() + timedelta(hours=12),
+                                secure=cookie_secure, same_site="strict",
+                            )
+                        set_api_token(st.session_state.api_token)
+                        st.rerun()
+                    else:
+                        st.session_state.login_error = resp.error or "No se pudo iniciar sesión. Revisa tus credenciales."
+                if st.session_state.get("login_error"):
+                    st.session_state.clear_login_password = True
+                    st.rerun()
+            if st.session_state.get("login_error"):
+                st.error(st.session_state.login_error)
+            st.markdown('<div class="login-security">Acceso privado · sesión protegida</div>', unsafe_allow_html=True)
+    st.stop()
+
 st.markdown(craneo_flotante(ICONO), unsafe_allow_html=True)
 
 VOZ_FILE = os.path.join(os.path.dirname(__file__), "config_voz.json")
@@ -213,23 +328,7 @@ def panel_tema():
     st.selectbox("Estilo base", list(temas.PRESETS), key="t_preset", format_func=lambda k: temas.PRESETS[k]["nombre"], on_change=_aplicar_preset)
     st.caption(temas.PRESETS[st.session_state.t_preset]["detalle"])
     st.markdown(temas.vista_previa_html(TEMA), unsafe_allow_html=True)
-    st.markdown('<div class="seccion">Colores</div>', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    c1.color_picker("Acento", key="t_acento")
-    c2.color_picker("2.º acento", key="t_acento2")
-    c3.color_picker("Fondo", key="t_fondo")
-    c4.color_picker("Texto", key="t_texto")
-    st.toggle("Degradado en acentos", key="t_degradado", help="Mezcla el acento con el segundo color en botones, burbujas y avatares.")
-    st.markdown('<div class="seccion">Forma y tipografía</div>', unsafe_allow_html=True)
-    st.select_slider("Redondeo", options=list(temas.RADIOS), key="t_radio")
-    st.select_slider("Ancho del chat", options=list(temas.ANCHOS), key="t_ancho")
-    st.selectbox("Fuente", list(temas.FUENTES), key="t_fuente")
-    st.selectbox("Fondo de la app", temas.FONDOS, key="t_fondo_estilo")
-    st.markdown('<div class="seccion">Efectos y marca</div>', unsafe_allow_html=True)
-    st.toggle("Brillo (glow)", key="t_brillo")
-    st.toggle("Animaciones", key="t_animaciones")
     st.selectbox("Icono del asistente", temas.ICONOS, key="t_icono")
-    st.button("Restablecer tema", icon=":material/restart_alt:", on_click=_restablecer_tema, use_container_width=True)
 
 
 def pintar_tokens():
@@ -265,42 +364,16 @@ with st.sidebar:
         st.caption("Revisa NEON_DATABASE_URL en .env")
 
     # --- AUTENTICACIÓN API ---
-    from api_client import get_api_client, set_api_token
-    api = get_api_client()
-    
-    if "api_token" not in st.session_state:
+    st.success(f"Conectado como {st.session_state.get('api_user', 'admin')}")
+    if st.button("Cerrar sesión", icon=":material/logout:", use_container_width=True):
         st.session_state.api_token = None
-    
-    if not st.session_state.api_token:
-        with st.expander("🔐 Iniciar sesión (Admin)", expanded=True):
-            auth_user = st.text_input("Usuario", placeholder="oscar")
-            auth_pass = st.text_input("Contraseña", type="password", placeholder="12345")
-            if st.button("Entrar", use_container_width=True):
-                if auth_user and auth_pass:
-                    import asyncio
-                    async def do_login():
-                        return await api._request("POST", "/api/auth/login", json={"username": auth_user, "password": auth_pass})
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    resp = loop.run_until_complete(do_login())
-                    loop.close()
-                    if resp.ok:
-                        token = resp.data.get("token")
-                        if token:
-                            st.session_state.api_token = token
-                            set_api_token(token)
-                            st.success("✅ Autenticado")
-                            st.rerun()
-                    else:
-                        st.error(f"Error: {resp.error}")
-                else:
-                    st.warning("Usuario y contraseña requeridos")
-    else:
-        st.success(f"🟢 Conectado como admin")
-        if st.button("Cerrar sesión", use_container_width=True):
-            st.session_state.api_token = None
-            set_api_token(None)
-            st.rerun()
+        st.session_state.api_user = None
+        st.session_state.login_error = None
+        st.session_state.clear_login_password = True
+        if isinstance(cookie_controller.getAll(), dict) and cookie_controller.get("crovn_auth_token"):
+            cookie_controller.remove("crovn_auth_token", secure=cookie_secure)
+        set_api_token(None)
+        st.rerun()
 
     if st.button("Nuevo chat", icon=":material/add:", type="primary", use_container_width=True):
         st.session_state.chats.append(_chat_vacio())
