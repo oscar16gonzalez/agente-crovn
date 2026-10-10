@@ -31,3 +31,5 @@ services:
         sync: false
       - key: NOTIFY_EMAIL
         sync: false
+      - key: API_BASE_URL
+        value: https://crovn-backend.vercel.app
