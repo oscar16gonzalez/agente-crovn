@@ -294,6 +294,7 @@ TABLAS = {
             "Cambiar estado: UPDATE orders SET status = '<estado>' WHERE id = N (el correo al cliente solo se envía desde el panel).",
         ],
         "ejemplos": [
+            ("listado de órdenes", """SELECT o.id, c.name AS cliente, o.total, o.status, o.\"createdAt\" FROM orders o JOIN customers c ON c.id = o.\"customerId\" ORDER BY o.\"createdAt\" DESC;""", []),
             ("listado de órdenes pendientes", """SELECT o.id, c.name AS cliente, o.total, o.status, o."createdAt" FROM orders o JOIN customers c ON c.id = o."customerId" WHERE o.status = 'Pendiente' ORDER BY o."createdAt" DESC;""", []),
             ("órdenes enviadas", """SELECT o.id, c.name AS cliente, o.total, o.status, o."createdAt" FROM orders o JOIN customers c ON c.id = o."customerId" WHERE o.status = 'Enviado' ORDER BY o."createdAt" DESC;""", []),
             ("resumen de órdenes por estado", """SELECT status, COUNT(*) AS ordenes, SUM(total) AS total FROM orders GROUP BY status ORDER BY status;""", []),
@@ -414,8 +415,9 @@ TABLAS = {
             "Productos de un proveedor: JOIN products p ON p.\"supplierId\" = s.id.",
         ],
         "ejemplos": [
+            ("lista de productos por proveedor", """SELECT s.id AS proveedor_id, s.name AS proveedor, p.id AS producto_id, p.name AS producto, p.category AS categoria, p.price AS precio, p.stock FROM products p JOIN suppliers s ON p.\"supplierId\" = s.id WHERE s.active = true ORDER BY s.name, p.name;""", []),
             ("proveedores activos", """SELECT id, name, contact, phone, email FROM suppliers WHERE active = true ORDER BY name;""", []),
-            ("productos por proveedor", """SELECT s.name AS proveedor, COUNT(DISTINCT p.id) AS cantidad_productos FROM suppliers s LEFT JOIN products p ON p."supplierId" = s.id GROUP BY s.id, s.name ORDER BY cantidad_productos DESC, s.name;""", []),
+            ("productos por proveedor", """SELECT s.id AS proveedor_id, s.name AS proveedor, p.id AS producto_id, p.name AS producto, p.category AS categoria, p.price AS precio, p.stock FROM products p JOIN suppliers s ON p."supplierId" = s.id WHERE s.active = true ORDER BY s.name, p.name;""", []),
             ("productos sin proveedor", """SELECT id, name, category FROM products WHERE "supplierId" IS NULL;""", []),
             ("crea un proveedor llamado Textiles SA con teléfono 3001234567",
              """INSERT INTO suppliers (name, contact, phone, email, address, notes, active, "updatedAt") VALUES (%s, %s, %s, %s, %s, %s, true, NOW());""",

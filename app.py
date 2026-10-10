@@ -25,6 +25,7 @@ _tema_guardado = temas.cargar()
 st.set_page_config(page_title="CROVN Agente", page_icon=_tema_guardado["icono"], layout="wide")
 
 CLAVES_TEMA = ("preset", "acento", "acento2", "fondo", "texto", "degradado", "fuente", "radio", "ancho", "fondo_estilo", "brillo", "animaciones", "icono")
+PROMPT_LISTADO_ORDENES = "Listado de órdenes"
 if "t_preset" not in st.session_state:
     _p = temas.PRESETS[_tema_guardado["preset"]]
     for _k in CLAVES_TEMA:
@@ -526,7 +527,7 @@ with st.container(key="quick_actions"), st.popover(ICONO, help="Acciones rápida
         st.session_state.sugerencia_activa = PROMPT_BALANCE_SEMANAL
         st.rerun()
     if st.button("Listado de órdenes", icon=":material/receipt_long:", key="quick_orders_list", use_container_width=True):
-        st.session_state.sugerencia_activa = "Listado de órdenes pendientes"
+        st.session_state.sugerencia_activa = PROMPT_LISTADO_ORDENES
         st.rerun()
     if st.button(CHAT_NUEVO, icon=":material/add:", key="quick_new_chat", use_container_width=True):
         crear_chat()
@@ -552,7 +553,7 @@ entrada_pendiente = bool(texto_entrada or st.session_state.get("sugerencia_activ
 
 TARJETAS = [
     (":material/inventory_2:", "Productos sin stock"),
-    (":material/receipt_long:", "Listado de órdenes pendientes"),
+    (":material/receipt_long:", PROMPT_LISTADO_ORDENES),
     (":material/trending_up:", "Productos más vendidos"),
     (":material/sell:", "Códigos de promoción activos"),
     (ICONO_BALANCE_SEMANAL, PROMPT_BALANCE_SEMANAL),
