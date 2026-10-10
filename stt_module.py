@@ -7,7 +7,10 @@ _model = None
 LOCK = threading.RLock()
 
 
-def cargar_modelo(nombre="base"):
+def cargar_modelo(nombre="tiny"):
+    """Carga el modelo Whisper de forma perezosa (lazy loading).
+    Por defecto usa 'tiny' para menor uso de memoria y carga más rápida.
+    """
     global _model
     with LOCK:
         if _model is None:
